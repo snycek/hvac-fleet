@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "hvac-client",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:client"],
+      "port": 5173
+    },
+    {
+      "name": "hvac-server",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["server.js"],
+      "port": 3001
+    }
+  ]
+}

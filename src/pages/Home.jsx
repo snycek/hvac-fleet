@@ -39,9 +39,9 @@ export default function Home({ setPage }) {
         }}>
           Downriver Michigan's Trusted HVAC Fleet
         </div>
-        <h1 style={{ lineHeight: 1.8 }}>
-          No Sweat.<br /><br />
-          No Freeze.<br /><br />
+        <h1 style={{ lineHeight: 1.4 }}>
+          No Sweat.<br />
+          No Freeze.<br />
           <span style={{ color: 'var(--accent-teal)' }}>Just DuctTales!</span>
         </h1>
         <p style={{ maxWidth: '560px', margin: '0 auto 24px', lineHeight: 1.7 }}>

@@ -9,7 +9,7 @@
     "dev:server": "node server.js",
     "build": "vite build",
     "build:prod": "npm run build",
-    "start": "node server.js",
+    "start": "npm run build && node server.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },

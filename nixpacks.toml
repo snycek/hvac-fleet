@@ -1,0 +1,8 @@
+[phases.install]
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["echo 'build deferred to start'"]
+
+[start]
+cmd = "npm run build && node server.js"

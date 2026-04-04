@@ -52,7 +52,7 @@ function ContactForm({ compact = false, onSuccess }) {
       address: String(data.get('address') || '').trim(),
       city: String(data.get('city') || '').trim(),
       zip: String(data.get('zip') || '').trim(),
-      requestChoice: String(data.get('requestChoice') || ''),
+      requestChoice: form.requestChoice || String(data.get('requestChoice') || ''),
       bestTime: String(data.get('bestTime') || ''),
       message: String(data.get('message') || '').trim(),
     };

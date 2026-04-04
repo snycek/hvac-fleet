@@ -6,3 +6,4 @@ cmds = ["echo 'build deferred to start'"]
 
 [start]
 cmd = "npm run build && node server.js"
+

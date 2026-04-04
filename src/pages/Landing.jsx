@@ -91,15 +91,13 @@ function ContactForm({ compact = false, onSuccess }) {
 
       setState('success');
       setForm({ name: '', email: '', phone: '', address: '', city: '', zip: '', requestChoice: '', bestTime: DEFAULT_BEST_TIME, message: '' });
-      if (onSuccess) {
-        setTimeout(() => onSuccess(), 1500);
-      }
     } catch (err) {
-      // Still redirect back even on error — the request was attempted
       setState('error');
       setErrMsg(err.message || 'Unable to reach the server.');
+    } finally {
+      // Always redirect back to home after submission attempt
       if (onSuccess) {
-        setTimeout(() => onSuccess(), 2500);
+        setTimeout(() => onSuccess(), 1500);
       }
     }
   };

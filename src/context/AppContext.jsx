@@ -3,32 +3,58 @@ import { FIREBASE_ENABLED, db } from '../lib/firebase.js';
 import { mockJobs } from '../data/mockData.js';
 
 const AppContext = createContext(null);
+const DEMO_USERNAME = 'youre';
+const DEMO_PASSWORD = 'doingawesome';
 
 export function AppProvider({ children }) {
-  const [user, setUser]   = useState(null);
-  const [role, setRole]   = useState(null); // 'technician' | 'manager' | 'owner'
-  const [activeTechId, setActiveTechId] = useState(null);
+  // Restore session from localStorage
+  const savedSession = (() => {
+    try {
+      const s = localStorage.getItem('ducttales_session');
+      return s ? JSON.parse(s) : null;
+    } catch { return null; }
+  })();
+
+  const [user, setUser]   = useState(savedSession?.user || null);
+  const [role, setRole]   = useState(savedSession?.role || null);
+  const [activeTechId, setActiveTechId] = useState(savedSession?.activeTechId || null);
   const [jobs, setJobs] = useState(mockJobs.map(j => ({ ...j })));
 
   const demoMode = !FIREBASE_ENABLED;
 
+  const saveSession = (userData, roleData, techId) => {
+    try {
+      localStorage.setItem('ducttales_session', JSON.stringify({
+        user: userData, role: roleData, activeTechId: techId
+      }));
+    } catch {}
+  };
+
   const loginDemo = (selectedRole, techId = null, techDisplayName = null) => {
     setRole(selectedRole);
-    setUser({
+    const userData = {
       uid: `demo-${selectedRole}`,
       displayName: selectedRole === 'technician'
         ? (techDisplayName || 'Marcus Williams')
         : selectedRole === 'manager'
           ? 'Alex Manager'
           : 'Owner',
-    });
-    if (selectedRole === 'technician') setActiveTechId(techId || 'tech-001');
+    };
+    setUser(userData);
+    const finalTechId = selectedRole === 'technician' ? (techId || 'tech-001') : null;
+    if (selectedRole === 'technician') setActiveTechId(finalTechId);
+    saveSession(userData, selectedRole, finalTechId);
+  };
+
+  const verifyDemoCredentials = (username, password) => {
+    return username === DEMO_USERNAME && password === DEMO_PASSWORD;
   };
 
   const logout = () => {
     setUser(null);
     setRole(null);
     setActiveTechId(null);
+    localStorage.removeItem('ducttales_session');
   };
 
   const createJob = useCallback(async (jobData) => {
@@ -60,7 +86,7 @@ export function AppProvider({ children }) {
   }, []);
 
   return (
-    <AppContext.Provider value={{ user, setUser, role, setRole, demoMode, activeTechId, setActiveTechId, loginDemo, logout, jobs, setJobs, createJob, updateJobStatus, assignJob }}>
+    <AppContext.Provider value={{ user, setUser, role, setRole, demoMode, activeTechId, setActiveTechId, loginDemo, verifyDemoCredentials, logout, jobs, setJobs, createJob, updateJobStatus, assignJob }}>
       {children}
     </AppContext.Provider>
   );

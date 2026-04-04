@@ -28,12 +28,33 @@ const DEMO_ROLES = [
 ];
 
 export default function Login({ setPage }) {
-  const { loginDemo } = useApp();
+  const { loginDemo, verifyDemoCredentials } = useApp();
   const { technicians } = useTechnicians();
   const selectableTechs = technicians.filter(t => t.status !== 'pending_approval');
   const [selectedTechId, setSelectedTechId] = useState('tech-001');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [credentialsVerified, setCredentialsVerified] = useState(false);
+
+  const handleVerifyCredentials = () => {
+    const isValid = verifyDemoCredentials(username.trim(), password);
+    if (!isValid) {
+      setCredentialsVerified(false);
+      setAuthError('Invalid credentials. Please try again.');
+      return;
+    }
+
+    setCredentialsVerified(true);
+    setAuthError('');
+  };
 
   const handleDemo = (role, techId) => {
+    if (!credentialsVerified) {
+      setAuthError('Please submit valid credentials before selecting a role.');
+      return;
+    }
+
     const resolvedTechId = role === 'technician' ? (techId || selectedTechId) : null;
     const selectedTech = role === 'technician' ? selectableTechs.find(t => t.id === resolvedTechId) : null;
     loginDemo(role, resolvedTechId, selectedTech?.name || null);
@@ -53,8 +74,60 @@ export default function Login({ setPage }) {
         <div style={{ fontSize: '48px', marginBottom: '16px' }}>🦆</div>
         <h1 style={{ fontSize: '30px', fontWeight: 700, marginBottom: '10px' }}>DuctTales Portal</h1>
         <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '15px' }}>
-          Select your role to enter the demo — no account required.
+          Enter your credentials, then select a role to enter the portal.
         </p>
+
+        <div className="card" style={{ marginBottom: '16px', padding: '14px 16px', textAlign: 'left' }}>
+          <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Username</label>
+          <input
+            className="form-input"
+            type="text"
+            value={username}
+            onChange={e => {
+              setUsername(e.target.value);
+              setCredentialsVerified(false);
+              if (authError) setAuthError('');
+            }}
+            autoComplete="username"
+          />
+
+          <label className="form-label" style={{ marginBottom: '6px', display: 'block', marginTop: '12px' }}>Password</label>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <input
+              className="form-input"
+              type="password"
+              value={password}
+              onChange={e => {
+                setPassword(e.target.value);
+                setCredentialsVerified(false);
+                if (authError) setAuthError('');
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleVerifyCredentials();
+                }
+              }}
+              autoComplete="current-password"
+              style={{ flex: 1 }}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={handleVerifyCredentials}
+              style={{ whiteSpace: 'nowrap', height: '40px', padding: '0 14px' }}
+            >
+              Submit
+            </button>
+          </div>
+
+          {authError && (
+            <p style={{ marginTop: '10px', color: '#f85149', fontSize: '12px' }}>{authError}</p>
+          )}
+          {credentialsVerified && (
+            <p style={{ marginTop: '10px', color: '#3fb950', fontSize: '12px' }}>Credentials verified. Choose a role below.</p>
+          )}
+        </div>
 
         <div className="card" style={{ marginBottom: '16px', padding: '14px 16px', textAlign: 'left' }}>
           <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Technician Login Profile</label>
@@ -70,6 +143,7 @@ export default function Login({ setPage }) {
             <button
               key={role}
               onClick={() => handleDemo(role, role === 'technician' ? selectedTechId : techId)}
+              disabled={!credentialsVerified}
               style={{
                 background: 'var(--bg-elevated)',
                 border: `2px solid ${color}44`,
@@ -78,13 +152,21 @@ export default function Login({ setPage }) {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '20px',
-                cursor: 'pointer',
+                cursor: credentialsVerified ? 'pointer' : 'not-allowed',
                 textAlign: 'left',
                 transition: 'border-color 0.2s, background 0.2s',
                 width: '100%',
+                opacity: credentialsVerified ? 1 : 0.55,
               }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.background = color + '11'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = color + '44'; e.currentTarget.style.background = 'var(--bg-elevated)'; }}
+              onMouseEnter={e => {
+                if (!credentialsVerified) return;
+                e.currentTarget.style.borderColor = color;
+                e.currentTarget.style.background = color + '11';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = color + '44';
+                e.currentTarget.style.background = 'var(--bg-elevated)';
+              }}
             >
               <div style={{
                 width: '52px', height: '52px', borderRadius: '50%',

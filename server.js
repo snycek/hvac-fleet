@@ -37,13 +37,20 @@ const defaultOrigins = [
   'https://fleet.swordfishconsultingin.com',
   'https://www.swordfishconsultingin.com',
   'https://swordfishconsultingin.com',
+  'https://fleet.swordfishconsultinginc.com',
+  'https://www.swordfishconsultinginc.com',
+  'https://swordfishconsultinginc.com',
+  'https://hvac-fleet-production.up.railway.app',
 ];
 
 const allowedOrigins = new Set([...defaultOrigins, ...envOrigins]);
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
+    const isRailwayAppOrigin = typeof origin === 'string' && /\.up\.railway\.app$/i.test(origin.replace(/^https?:\/\//i, ''));
+    const isSwordfishOrigin = typeof origin === 'string' && /(^|\.)swordfishconsultinginc\.com$/i.test(origin.replace(/^https?:\/\//i, ''));
+
+    if (!origin || allowedOrigins.has(origin) || isRailwayAppOrigin || isSwordfishOrigin) {
       return callback(null, true);
     }
     return callback(new Error('CORS not allowed for this origin'));

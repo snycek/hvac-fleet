@@ -23,6 +23,7 @@ const REQUEST_CHOICES = [
 const DEFAULT_BEST_TIME = 'ASAP – Emergency';
 
 function ContactForm({ compact = false, onSuccess }) {
+  const formRef = useRef(null);
   const [form, setForm] = useState({
     name: '', email: '', phone: '',
     address: '', city: '', zip: '',
@@ -39,9 +40,31 @@ function ContactForm({ compact = false, onSuccess }) {
 
   const selectedChoice = REQUEST_CHOICES.find(c => c.id === form.requestChoice);
 
+  const readFormValues = () => {
+    const el = formRef.current;
+    if (!el) return form;
+
+    const data = new FormData(el);
+    return {
+      name: String(data.get('name') || '').trim(),
+      email: String(data.get('email') || '').trim(),
+      phone: String(data.get('phone') || '').trim(),
+      address: String(data.get('address') || '').trim(),
+      city: String(data.get('city') || '').trim(),
+      zip: String(data.get('zip') || '').trim(),
+      requestChoice: String(data.get('requestChoice') || ''),
+      bestTime: String(data.get('bestTime') || ''),
+      message: String(data.get('message') || '').trim(),
+    };
+  };
+
   const handleSubmit = async e => {
     e.preventDefault();
-    if (!form.name || !form.requestChoice || !form.phone) return;
+    const submitted = readFormValues();
+    setForm(submitted);
+    const submittedChoice = REQUEST_CHOICES.find(c => c.id === submitted.requestChoice);
+
+    if (!submitted.name || !submitted.requestChoice || !submitted.phone) return;
     setState('loading');
     setErrMsg('');
     try {
@@ -49,9 +72,9 @@ function ContactForm({ compact = false, onSuccess }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...form,
-          service: selectedChoice?.serviceName || 'Inspection Request',
-          earnings: selectedChoice?.earnings || 0,
+          ...submitted,
+          service: submittedChoice?.serviceName || 'Inspection Request',
+          earnings: submittedChoice?.earnings || 0,
         }),
       });
       const raw = await res.text();
@@ -82,41 +105,41 @@ function ContactForm({ compact = false, onSuccess }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} autoComplete="on" style={{ display: 'flex', flexDirection: 'column', gap: formGap }}>
+    <form ref={formRef} onSubmit={handleSubmit} autoComplete="on" style={{ display: 'flex', flexDirection: 'column', gap: formGap }}>
 
       {/* Name + Phone */}
       <div style={{ display: 'grid', gridTemplateColumns: twoColGrid, gap: formGap }}>
         <div>
           <label className="form-label">Full Name *</label>
-          <input className="form-input" style={controlStyle} name="name" value={form.name} onChange={handleChange} placeholder="John Smith" autoComplete="name" required />
+          <input className="form-input" style={controlStyle} name="name" value={form.name} onChange={handleChange} placeholder="John Smith" autoComplete="section-service name" required />
         </div>
         <div>
           <label className="form-label">Phone Number *</label>
-          <input className="form-input" style={controlStyle} name="phone" value={form.phone} onChange={handleChange} placeholder="(313) 555-0000" autoComplete="tel" required />
+          <input className="form-input" style={controlStyle} type="tel" inputMode="tel" name="phone" value={form.phone} onChange={handleChange} placeholder="(313) 555-0000" autoComplete="section-service tel" required />
         </div>
       </div>
 
       {/* Email */}
       <div>
         <label className="form-label">Email Address</label>
-        <input className="form-input" style={controlStyle} type="email" name="email" value={form.email} onChange={handleChange} placeholder="john@example.com" autoComplete="email" />
+        <input className="form-input" style={controlStyle} type="email" name="email" value={form.email} onChange={handleChange} placeholder="john@example.com" autoComplete="section-service email" />
       </div>
 
       {/* Address */}
       <div>
         <label className="form-label">Service Address *</label>
-        <input className="form-input" style={controlStyle} name="address" value={form.address} onChange={handleChange} placeholder="1234 Oak St" autoComplete="street-address" required />
+        <input className="form-input" style={controlStyle} name="address" value={form.address} onChange={handleChange} placeholder="1234 Oak St" autoComplete="section-service street-address" required />
       </div>
 
       {/* City + Zip */}
       <div style={{ display: 'grid', gridTemplateColumns: twoColGrid, gap: formGap }}>
         <div>
           <label className="form-label">City</label>
-          <input className="form-input" style={controlStyle} name="city" value={form.city} onChange={handleChange} placeholder="Wyandotte" autoComplete="address-level2" />
+          <input className="form-input" style={controlStyle} name="city" value={form.city} onChange={handleChange} placeholder="Wyandotte" autoComplete="section-service address-level2" />
         </div>
         <div>
           <label className="form-label">ZIP Code</label>
-          <input className="form-input" style={controlStyle} name="zip" value={form.zip} onChange={handleChange} placeholder="48192" autoComplete="postal-code" />
+          <input className="form-input" style={controlStyle} inputMode="numeric" name="zip" value={form.zip} onChange={handleChange} placeholder="48192" autoComplete="section-service postal-code" />
         </div>
       </div>
 
@@ -338,7 +361,7 @@ export default function Landing({ setPage, mode = 'home' }) {
             <h1 style={{ fontSize: isMobileHero ? '34px' : '42px', fontWeight: 800, marginBottom: '8px' }}>Request Service</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '15px' }}>Send your request now. Dispatch sees this in real time.</p>
           </div>
-          <ContactForm compact={compactRequestForm} onSuccess={() => setPage('landing')} />
+          <ContactForm compact={compactRequestForm} onSuccess={() => { setPage('landing'); window.scrollTo(0, 0); }} />
         </div>
       </section>
     );

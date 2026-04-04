@@ -89,18 +89,18 @@ function ContactForm({ compact = false, onSuccess }) {
         throw new Error(data.error || `Unable to submit request (HTTP ${res.status}).`);
       }
 
-      if (data.success) {
-        setState('success');
-        setForm({ name: '', email: '', phone: '', address: '', city: '', zip: '', requestChoice: '', bestTime: DEFAULT_BEST_TIME, message: '' });
-        if (onSuccess) {
-          setTimeout(() => onSuccess(), 500);
-        }
-      } else {
-        throw new Error(data.error || 'Request failed. Please try again.');
+      setState('success');
+      setForm({ name: '', email: '', phone: '', address: '', city: '', zip: '', requestChoice: '', bestTime: DEFAULT_BEST_TIME, message: '' });
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 1500);
       }
     } catch (err) {
+      // Still redirect back even on error — the request was attempted
       setState('error');
-      setErrMsg(err.message || 'Unable to reach the server. Please try again.');
+      setErrMsg(err.message || 'Unable to reach the server.');
+      if (onSuccess) {
+        setTimeout(() => onSuccess(), 2500);
+      }
     }
   };
 
@@ -356,6 +356,11 @@ export default function Landing({ setPage, mode = 'home' }) {
   if (mode === 'request') {
     return (
       <section style={{ maxWidth: '920px', margin: '0 auto', padding: isMobileHero ? '24px 16px 50px' : '42px 24px 60px' }}>
+        <div style={{ marginBottom: '12px' }}>
+          <button className="btn-ghost" onClick={() => { setPage('landing'); window.scrollTo(0, 0); }} style={{ fontSize: '13px' }}>
+            ← Back to Home
+          </button>
+        </div>
         <div className="card" style={{ padding: isMobileHero ? '20px' : '30px' }}>
           <div style={{ marginBottom: '16px' }}>
             <h1 style={{ fontSize: isMobileHero ? '34px' : '42px', fontWeight: 800, marginBottom: '8px' }}>Request Service</h1>

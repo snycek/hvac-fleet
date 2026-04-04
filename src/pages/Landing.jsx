@@ -357,7 +357,7 @@ export default function Landing({ setPage, mode = 'home' }) {
     return (
       <section style={{ maxWidth: '920px', margin: '0 auto', padding: isMobileHero ? '24px 16px 50px' : '42px 24px 60px' }}>
         <div style={{ marginBottom: '12px' }}>
-          <button className="btn-ghost" onClick={() => { setPage('landing'); window.scrollTo(0, 0); }} style={{ fontSize: '13px' }}>
+          <button className="btn-ghost" onClick={() => { setPage('home'); window.scrollTo(0, 0); }} style={{ fontSize: '13px' }}>
             ← Back to Home
           </button>
         </div>
@@ -366,7 +366,7 @@ export default function Landing({ setPage, mode = 'home' }) {
             <h1 style={{ fontSize: isMobileHero ? '34px' : '42px', fontWeight: 800, marginBottom: '8px' }}>Request Service</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '15px' }}>Send your request now. Dispatch sees this in real time.</p>
           </div>
-          <ContactForm compact={compactRequestForm} onSuccess={() => { setPage('landing'); window.scrollTo(0, 0); }} />
+          <ContactForm compact={compactRequestForm} onSuccess={() => { setPage('home'); window.scrollTo(0, 0); }} />
         </div>
       </section>
     );
@@ -376,7 +376,7 @@ export default function Landing({ setPage, mode = 'home' }) {
     return (
       <section style={{ maxWidth: '920px', margin: '0 auto', padding: isMobileHero ? '24px 16px 50px' : '42px 24px 60px' }}>
         <div style={{ marginBottom: '16px' }}>
-          <button className="btn-ghost" onClick={() => setPage('landing')} style={{ fontSize: '13px' }}>
+          <button className="btn-ghost" onClick={() => setPage('home')} style={{ fontSize: '13px' }}>
             ← Back to Home
           </button>
         </div>

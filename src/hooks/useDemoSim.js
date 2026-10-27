@@ -338,8 +338,9 @@ const QUOTE_SEEDS = [
   { near: 'wk-330', dLat: 0.0004, dLng: -0.0006, name: 'Gwen Albrecht', bump: -30, notes: 'Please skip the flower bed by the porch.', zones: [['Front Yard', 1800], ['Back Yard', 3300], ['Side Yard', 700]], hoursAgo: 44 },
 ];
 const ZONE_TINTS = ['#4ade80', '#38bdf8', '#facc15'];
-function demoQuotes(weekStart) {
-  return QUOTE_SEEDS.map((s, i) => {
+// One quote request for week weekStart: QUOTE_SEEDS[i], sent the evening before.
+function demoQuote(i, weekStart) {
+  return [QUOTE_SEEDS[i]].map(s => {
     const near = lawnById[s.near];
     const lat = near.lat + s.dLat;
     const lng = near.lng + s.dLng;
@@ -376,7 +377,7 @@ function demoQuotes(weekStart) {
       createdAt: iso(at(weekStart, 7) - s.hoursAgo * 3600000),
       quote: { totalSqFt, estimate, wanted: ['Lawn Cutting'], center: { lat, lng }, zones },
     };
-  });
+  })[0];
 }
 
 // The demo starts on the Monday of the week holding the 1st of this month
@@ -395,7 +396,9 @@ function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), star
     delays: past.delays,
     payments: [],
     shifts: past.shifts,
-    jobs: [...past.jobs, ...jobsForDay(weekStart, 0, trucks), ...demoQuotes(weekStart)],
+    // New quote requests: one to start, then one more each new week, 3 in all.
+    jobs: [...past.jobs, ...jobsForDay(weekStart, 0, trucks), demoQuote(0, weekStart)],
+    quotesSent: 1,
     custom: {},
     extraLawns: {},
     expenses: past.expenses,
@@ -476,12 +479,17 @@ export function useDemoSim() {
         expenses = books.expenses;
         const payments = books.payments;
         if (day === 0 && Number(next.slice(8)) <= 7) expenses = [maintenance(next, w.truckCount), ...expenses];
-        if (paidCount) lastEvent = `💵 ${paidCount} paid · +$${paidSum}${declined ? ` · ❌ ${declined} declined` : ''}`;
+        if (paidCount) lastEvent = `💵 ${paidCount} paid · +${paidSum}${declined ? ` · ❌ ${declined} declined` : ''}`;
+        // Monday morning: a new quote request came in over the weekend (until all 3 are used).
+        const quotesSent = w.quotesSent ?? QUOTE_SEEDS.length;
+        const newQuote = day === 0 && quotesSent < QUOTE_SEEDS.length ? demoQuote(quotesSent, next) : null;
+        if (newQuote) lastEvent = `📝 New quote request · ${newQuote.clientName}`;
         setPositions(depotPositions(w.truckCount));
         commitWorld({
           ...w, weekStart, day, week, night: 0, expenses, payments, lastEvent,
           dayCount: w.dayCount + 1,
-          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount, w)],
+          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount, w), ...(newQuote ? [newQuote] : [])],
+          quotesSent: quotesSent + (newQuote ? 1 : 0),
           technicians: crewFor(next, w.truckCount),
           trucks: freshTrucks(next, w.truckCount),
         });

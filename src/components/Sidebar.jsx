@@ -1,31 +1,14 @@
 import { useState } from 'react';
 import './Sidebar.css';
+import { ALL_SERVICES, COMPANY_INFO } from '../data/services.js';
 
 const NAV_ITEMS = [
   { id: 'home', label: 'Home' },
   {
-    id: 'heating', label: 'Heating', children: [
-      { id: 'furnace-repair', label: 'Furnace Repair' },
-      { id: 'furnace-install', label: 'Furnace Install' },
-      { id: 'heating-maintenance', label: 'Heating Maintenance' },
-    ],
+    id: 'services', label: 'Services',
+    children: ALL_SERVICES.map(s => ({ id: s.id, label: s.name })),
   },
-  {
-    id: 'cooling', label: 'Cooling', children: [
-      { id: 'ac-repair', label: 'AC Repair' },
-      { id: 'ac-install', label: 'AC Install' },
-      { id: 'ductless-systems', label: 'Ductless Systems' },
-      { id: 'ac-maintenance', label: 'AC Maintenance' },
-    ],
-  },
-  {
-    id: 'home-services', label: 'Home Services', children: [
-      { id: 'water-heater', label: 'Water Heater' },
-      { id: 'indoor-air-quality', label: 'Indoor Air Quality' },
-      { id: 'duct-cleaning', label: 'Duct Cleaning' },
-      { id: 'smart-thermostats', label: 'Smart Thermostats' },
-    ],
-  },
+  { id: 'quote', label: 'Request a Quote' },
   { id: 'specials', label: 'Specials' },
   {
     id: 'about-group', label: 'About', children: [
@@ -59,6 +42,7 @@ export default function Sidebar({ page, setPage }) {
   const isActive = (id) => {
     if (id === 'home' && page === 'home') return true;
     if (id === 'careers' && page === 'technician-apply') return true;
+    if (id === 'quote' && page.startsWith('quote')) return true;
     return page === id;
   };
 
@@ -92,8 +76,8 @@ export default function Sidebar({ page, setPage }) {
         </button>
 
         <div className="sidebar-logo" onClick={() => navigate('home')}>
-          <span>&#129414;</span>
-          <span>DuctTales</span>
+          <span>🌱</span>
+          <span>{COMPANY_INFO.shortName}</span>
         </div>
 
         <nav className="sidebar-nav">
@@ -133,8 +117,8 @@ export default function Sidebar({ page, setPage }) {
         </nav>
 
         <div className="sidebar-footer">
-          <a href="tel:3133789982" className="sidebar-emergency">
-            &#128248; Emergency: (313) 378-9982
+          <a href={COMPANY_INFO.phoneHref} className="sidebar-emergency">
+            📞 Call: {COMPANY_INFO.phone}
           </a>
           <button className="sidebar-portal" onClick={() => { setPage('login'); setMobileOpen(false); }}>
             Portal Login &rarr;

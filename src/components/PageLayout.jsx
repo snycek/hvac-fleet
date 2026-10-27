@@ -1,18 +1,17 @@
 import Sidebar from './Sidebar.jsx';
 import Navbar from './Navbar.jsx';
 import { useApp } from '../context/AppContext.jsx';
+import { SERVICE_PAGE_IDS } from '../data/services.js';
 
 const PUBLIC_PAGES = [
-  'home', 'request-service', 'technician-apply', 'login',
-  'furnace-repair', 'furnace-install', 'heating-maintenance',
-  'ac-repair', 'ac-install', 'ductless-systems', 'ac-maintenance',
-  'water-heater', 'indoor-air-quality', 'duct-cleaning', 'smart-thermostats',
+  'home', 'request-service', 'technician-apply', 'login', 'quote',
+  ...SERVICE_PAGE_IDS,
   'specials', 'about', 'service-areas', 'testimonials', 'careers', 'contact',
 ];
 
 export default function PageLayout({ page, setPage, children }) {
   const { role } = useApp();
-  const isDashboard = role && !PUBLIC_PAGES.includes(page);
+  const isDashboard = role && !PUBLIC_PAGES.includes(page) && !page.startsWith('quote');
 
   if (isDashboard) {
     return (

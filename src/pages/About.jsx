@@ -20,8 +20,8 @@ export default function About({ setPage, mode = 'story' }) {
         </div>
         <div className="card" style={{ marginTop: '20px', padding: '20px', textAlign: 'center' }}>
           <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginBottom: '12px' }}>Don't see your area? Give us a call — we may still be able to help.</p>
-          <a href="tel:3133789982" className="btn-primary" style={{ textDecoration: 'none', padding: '10px 24px' }}>
-            Call (313) 378-9982
+          <a href={COMPANY_INFO.phoneHref} className="btn-primary" style={{ textDecoration: 'none', padding: '10px 24px' }}>
+            Call {COMPANY_INFO.phone}
           </a>
         </div>
       </div>
@@ -38,10 +38,10 @@ export default function About({ setPage, mode = 'story' }) {
       <div className="card" style={{ marginBottom: '24px', padding: '28px' }}>
         <h3 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '12px' }}>About {COMPANY_INFO.name}</h3>
         <p style={{ fontSize: '15px', lineHeight: 1.8, color: 'var(--text-primary)', marginBottom: '16px' }}>
-          DuctTales HVAC was founded in {COMPANY_INFO.established} with a simple mission: deliver honest, reliable HVAC service to Downriver Michigan. We believe in upfront pricing, real-time dispatch, and technicians who actually care about your comfort.
+          {COMPANY_INFO.name} was founded in {COMPANY_INFO.established} with a simple mission: give Downriver Michigan homeowners a lawn crew they can count on. We believe in upfront pricing, showing up on schedule, and treating every yard like it is our own.
         </p>
         <p style={{ fontSize: '15px', lineHeight: 1.8, color: 'var(--text-primary)' }}>
-          Every technician on our fleet is background-checked, certified, and equipped with the parts and tools to get the job done right the first time. No upselling, no surprises — just straight-up service.
+          Every crew member is background-checked, trained, and running commercial-grade equipment so the job gets done right the first time. No upselling, no surprises — just a great-looking yard.
         </p>
       </div>
 

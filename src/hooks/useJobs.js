@@ -55,7 +55,7 @@ export function useJobs() {
     };
   }, []);
 
-  const updateJobStatus = useCallback(async (jobId, status) => {
+  const updateJobStatus2 = useCallback(async (jobId, status) => {
     if (!FIREBASE_ENABLED) {
       const completionPayload = status === 'completed' ? { completedAt: new Date().toISOString() } : {};
       try {
@@ -69,8 +69,10 @@ export function useJobs() {
           throw new Error(`Failed status update: ${res.status}`);
         }
 
-        const updated = await res.json();
-        setJobs(prev => prev.map(j => j.id === jobId ? updated : j));
+        const { nextJob, ...updated } = await res.json();
+        // A repeating cut comes back with its next visit already scheduled.
+        setJobs(prev => [...(nextJob ? [nextJob] : []), ...prev.map(j => j.id === jobId ? updated : j)]);
+        return { ...updated, nextJob };
       } catch (_err) {
         setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status, ...completionPayload } : j));
       }
@@ -129,5 +131,65 @@ export function useJobs() {
     await addDoc(col(db, 'jobs'), jobData);
   }, []);
 
-  return { jobs, updateJobStatus, assignJob, createJob };
+  // Owner accepts a quote: { scheduledDate, repeatDays, price, techId, service }
+  const scheduleJob = useCallback(async (jobId, plan) => {
+    const optimistic = {
+      status: 'assigned', assignedTo: plan.techId, scheduledDate: plan.scheduledDate,
+      repeatDays: plan.repeatDays, earnings: plan.price, service: plan.service, acceptedAt: new Date().toISOString(),
+    };
+    if (!FIREBASE_ENABLED) {
+      const res = await fetch(`/api/jobs/${jobId}/schedule`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(plan),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Couldn't schedule (HTTP ${res.status})`);
+      setJobs(prev => prev.map(j => (j.id === jobId ? data : j)));
+      return data;
+    }
+    const { doc, updateDoc } = await import('firebase/firestore');
+    await updateDoc(doc(db, 'jobs', jobId), optimistic);
+  }, []);
+
+  const declineJob = useCallback(async (jobId) => {
+    const patch = { status: 'declined', declinedAt: new Date().toISOString() };
+    if (!FIREBASE_ENABLED) {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/decline`, { method: 'PUT' });
+        if (!res.ok) throw new Error(`Failed decline: ${res.status}`);
+        const updated = await res.json();
+        setJobs(prev => prev.map(j => (j.id === jobId ? updated : j)));
+      } catch {
+        setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, ...patch } : j)));
+      }
+      return;
+    }
+    const { doc, updateDoc } = await import('firebase/firestore');
+    await updateDoc(doc(db, 'jobs', jobId), patch);
+  }, []);
+
+  // Owner marks a finished cut paid (paid=false undoes it).
+  const markPaid = useCallback(async (jobId, paid = true) => {
+    const patch = { paid, paidAt: paid ? new Date().toISOString() : null };
+    if (!FIREBASE_ENABLED) {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/paid`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paid }),
+        });
+        if (!res.ok) throw new Error(`Failed paid update: ${res.status}`);
+        const updated = await res.json();
+        setJobs(prev => prev.map(j => (j.id === jobId ? updated : j)));
+      } catch {
+        setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, ...patch } : j)));
+      }
+      return;
+    }
+    const { doc, updateDoc } = await import('firebase/firestore');
+    await updateDoc(doc(db, 'jobs', jobId), patch);
+  }, []);
+
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid };
 }

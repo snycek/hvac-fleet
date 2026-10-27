@@ -5,7 +5,7 @@
   --bg-surface:   #161b22;
   --bg-elevated:  #1c2128;
   --accent-blue:  #1f6feb;
-  --accent-teal:  #0fd3c3;
+  --accent-teal:  #4ade80;
   --text-primary: #e6edf3;
   --text-muted:   #8b949e;
   --border:       #30363d;
@@ -161,4 +161,41 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   }
   .page-hero h1 { font-size: 32px; }
   .page-hero { padding: 40px 16px; }
+}
+
+/* Yard-measuring quote tool */
+.quote-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .quote-layout { grid-template-columns: minmax(0, 1fr); }
+}
+.leaflet-tooltip.zone-label {
+  background: rgba(13, 17, 23, 0.82);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  padding: 4px 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+.leaflet-tooltip.zone-label::before { display: none; }
+.yard-pin, .yard-vertex { background: none; border: none; }
+
+/* Owner dashboard: crew list beside the live map, stacked on phones */
+.crew-map-grid {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  min-height: 440px;
+}
+.crew-map-grid > aside { max-height: 440px; }
+@media (max-width: 760px) {
+  .crew-map-grid { grid-template-columns: minmax(0, 1fr); }
+  .crew-map-grid > aside { max-height: 200px; border-right: none !important; border-bottom: 1px solid var(--border); }
+  .crew-map-grid > div { min-height: 360px; }
 }

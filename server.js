@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { mockJobs } from './src/data/mockData.js';
 import { mockTechnicians } from './src/data/mockData.js';
+import { suggestAddresses } from './src/lib/addressSuggest.js';
 
 // Load .env manually for ESM
 try {
@@ -56,10 +57,69 @@ app.use(cors({
     return callback(new Error('CORS not allowed for this origin'));
   },
 }));
-app.use(express.json());
+// Receipt photos come in as base64 images, so allow larger bodies.
+app.use(express.json({ limit: '8mb' }));
 
 const jobs = mockJobs.map((job) => ({ ...job }));
 const technicians = mockTechnicians.map((tech) => ({ ...tech }));
+const expenses = [];
+
+const EXPENSE_CATEGORIES = ['gas', 'maintenance', 'other'];
+
+// Demo history so lawn stats and the P/L have numbers before real use.
+function seedDemoHistory() {
+  const now = Date.now();
+  const day = 86400000;
+  const iso = (ms) => new Date(ms).toISOString();
+  const dateOnly = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // Existing finished demo job: give it timing and mark it paid.
+  jobs.filter((j) => j.status === 'completed').forEach((j, i) => {
+    const done = now - (3 + i) * day;
+    Object.assign(j, { startedAt: iso(done - 95 * 60000), completedAt: j.completedAt || iso(done), paid: true, paidAt: iso(done + day) });
+  });
+
+  // A weekly lawn with four past cuts (three paid) and the next one on the list.
+  const base = {
+    service: 'Lawn Cutting',
+    clientName: 'Pat Kowalczyk',
+    clientPhone: '(313) 555-0148',
+    address: '2145 Oak St, Wyandotte, MI 48192',
+    location: { lat: 42.2049, lng: -83.1587 },
+    assignedTo: 'tech-003',
+    earnings: 45,
+    repeatDays: 7,
+    notes: 'Notes: Gate code 4412. Dog in back — friendly.',
+    quote: { totalSqFt: 4380, estimate: 45, wanted: ['Lawn Cutting'], zones: [] },
+    acceptedAt: iso(now - 30 * day),
+  };
+  const cutMinutes = [38, 42, 35, 40];
+  cutMinutes.forEach((mins, i) => {
+    const done = now - (28 - i * 7) * day;
+    jobs.push({
+      ...base,
+      id: `job-demo-pat-${i}`,
+      status: 'completed',
+      scheduledDate: dateOnly(done),
+      createdAt: iso(done - day),
+      enRouteAt: iso(done - (mins + 12) * 60000),
+      startedAt: iso(done - mins * 60000),
+      completedAt: iso(done),
+      paid: i < 3,
+      paidAt: i < 3 ? iso(done + 2 * day) : null,
+    });
+  });
+  jobs.unshift({ ...base, id: 'job-demo-pat-next', status: 'assigned', scheduledDate: dateOnly(now), createdAt: iso(now - day) });
+
+  expenses.push(
+    { id: 'exp-demo-1', techId: 'tech-003', category: 'gas', amount: 48.2, date: dateOnly(now - 5 * day), note: 'Speedway', status: 'logged', createdAt: iso(now - 5 * day), loggedAt: iso(now - 5 * day) },
+    { id: 'exp-demo-2', techId: 'tech-001', category: 'maintenance', amount: 120, date: dateOnly(now - 9 * day), note: 'Blade sharpening', status: 'logged', createdAt: iso(now - 9 * day), loggedAt: iso(now - 9 * day) },
+  );
+}
+seedDemoHistory();
 
 function buildAddress(address, city, zip) {
   return [address, city, zip].filter(Boolean).join(', ');
@@ -98,6 +158,44 @@ async function geocodeAddress(fullAddress) {
   }
 }
 
+function validLatLng(loc) {
+  const lat = Number(loc?.lat);
+  const lng = Number(loc?.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+}
+
+// Keep only the shape we expect from the quote tool, with sane size limits.
+function sanitizeQuote(quote) {
+  if (!quote || !Array.isArray(quote.zones) || !quote.zones.length) return null;
+  const zones = quote.zones.slice(0, 25).map((z, i) => ({
+    name: String(z?.name || `Zone ${i + 1}`).slice(0, 40),
+    color: /^#[0-9a-f]{3,8}$/i.test(z?.color || '') ? z.color : '#4ade80',
+    sqFt: Math.max(0, Math.round(Number(z?.sqFt) || 0)),
+    points: (Array.isArray(z?.points) ? z.points : []).slice(0, 200)
+      .map(p => validLatLng({ lat: p?.[0], lng: p?.[1] }))
+      .filter(Boolean)
+      .map(p => [p.lat, p.lng]),
+  })).filter(z => z.points.length >= 3);
+  if (!zones.length) return null;
+  return {
+    zones,
+    totalSqFt: zones.reduce((s, z) => s + z.sqFt, 0),
+    estimate: Math.max(0, Math.round(Number(quote.estimate) || 0)),
+    wanted: (Array.isArray(quote.wanted) ? quote.wanted : []).slice(0, 5).map(s => String(s).slice(0, 40)),
+  };
+}
+
+function todayString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function addDays(dateString, days) {
+  const d = new Date(`${dateString}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 function createJobId() {
   return `job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 }
@@ -123,15 +221,16 @@ const TO_PHONE = process.env.TO_PHONE || '+13133789982';
 
 app.post('/api/contact', async (req, res) => {
   const { name, phone, email, address, city, zip, service, bestTime, message, earnings } = req.body;
+  const quote = sanitizeQuote(req.body.quote);
   if (!name || !service || !phone) {
     return res.status(400).json({ error: 'name, phone, and service are required' });
   }
 
   const fullAddress = buildAddress(address, city, zip);
-  const location = await geocodeAddress(fullAddress);
+  const location = validLatLng(req.body.location) || await geocodeAddress(fullAddress);
 
-  const inspectionFallback = /furnace inspection|ac inspection/i.test(service || '') ? 200 : 0;
-  const resolvedEarnings = typeof earnings === 'number' ? earnings : inspectionFallback;
+  const defaultEarnings = /lawn cutting/i.test(service || '') ? 40 : /leaf removal/i.test(service || '') ? 150 : 0;
+  const resolvedEarnings = typeof earnings === 'number' ? earnings : defaultEarnings;
 
   const createdJob = {
     id: createJobId(),
@@ -140,17 +239,20 @@ app.post('/api/contact', async (req, res) => {
     clientPhone: phone,
     address: fullAddress || 'Address not provided',
     location,
-    status: 'pending',
+    status: 'quote',
     assignedTo: null,
     earnings: resolvedEarnings,
+    requested: (Array.isArray(req.body.requested) ? req.body.requested : []).slice(0, 5).map(s => String(s).slice(0, 40)),
     notes: message || '',
     createdAt: new Date().toISOString(),
     bestTime: bestTime || '',
     email: email || '',
+    clientEmail: email || '',
+    ...(quote ? { quote } : {}),
   };
   jobs.unshift(createdJob);
 
-  const body = `🦆 New DuctTales Request\nName: ${name}\nPhone: ${phone}${email ? `\nEmail: ${email}` : ''}\nAddress: ${fullAddress || 'Not provided'}\nService: ${service}${bestTime ? `\nBest Time: ${bestTime}` : ''}\nNotes: ${message || 'None'}`;
+  const body = `🌱 New John's Lawn Request\nName: ${name}\nPhone: ${phone}${email ? `\nEmail: ${email}` : ''}\nAddress: ${fullAddress || 'Not provided'}\nService: ${service}${quote ? `\nMeasured: ${quote.totalSqFt.toLocaleString()} sq ft (${quote.zones.length} zones), estimate $${quote.estimate}` : ''}${bestTime ?`\nBest Time: ${bestTime}` : ''}\nNotes: ${message || 'None'}`;
   console.log('[SMS]', body);
 
   if (!twilioClient) {
@@ -167,6 +269,28 @@ app.post('/api/contact', async (req, res) => {
   } catch (err) {
     console.error('[SMS] Twilio error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/geocode', async (req, res) => {
+  const q = String(req.query.q || '').trim().slice(0, 200);
+  if (!q) return res.status(400).json({ error: 'q is required' });
+  const found = await geocodeAddress(q);
+  if (!found) return res.status(404).json({ error: 'address not found' });
+  res.json(found);
+});
+
+app.get('/api/address-suggest', async (req, res) => {
+  const q = String(req.query.q || '').slice(0, 120);
+  const fetchJson = async (url) => {
+    const r = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'johns-lawn-quote/1.0' } });
+    if (!r.ok) throw new Error(`photon ${r.status}`);
+    return r.json();
+  };
+  try {
+    res.json(await suggestAddresses(q, fetchJson));
+  } catch {
+    res.json([]);
   }
 });
 
@@ -211,12 +335,34 @@ app.put('/api/jobs/:id/status', (req, res) => {
   }
 
   const currentJob = jobs[idx];
+  const stamp = new Date().toISOString();
   const updatedJob = {
     ...currentJob,
     status,
-    completedAt: status === 'completed' ? new Date().toISOString() : currentJob.completedAt || null,
+    completedAt: status === 'completed' ? stamp : currentJob.completedAt || null,
+    // Timing for "average minutes to cut".
+    ...(status === 'en_route' && !currentJob.enRouteAt ? { enRouteAt: stamp } : {}),
+    ...(status === 'in_progress' && !currentJob.startedAt ? { startedAt: stamp } : {}),
   };
   jobs[idx] = updatedJob;
+
+  let nextJob = null;
+  if (status === 'completed' && currentJob.status !== 'completed' && updatedJob.repeatDays > 0) {
+    nextJob = {
+      ...updatedJob,
+      id: createJobId(),
+      status: updatedJob.assignedTo ? 'assigned' : 'pending',
+      scheduledDate: addDays(updatedJob.scheduledDate || todayString(), updatedJob.repeatDays),
+      completedAt: null,
+      enRouteAt: null,
+      startedAt: null,
+      paid: false,
+      paidAt: null,
+      createdAt: new Date().toISOString(),
+      previousJobId: updatedJob.id,
+    };
+    jobs.unshift(nextJob);
+  }
 
   if (updatedJob.assignedTo) {
     const techIdx = technicians.findIndex((t) => t.id === updatedJob.assignedTo);
@@ -239,7 +385,121 @@ app.put('/api/jobs/:id/status', (req, res) => {
       }
     }
   }
+  return res.json(nextJob ? { ...updatedJob, nextJob } : updatedJob);
+});
+
+// Owner accepts a quote: set price, first cut day, how often, and the foreman.
+app.put('/api/jobs/:id/schedule', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+
+  const { scheduledDate, repeatDays, price, techId, service } = req.body;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(scheduledDate || ''))) {
+    return res.status(400).json({ error: 'scheduledDate (YYYY-MM-DD) is required' });
+  }
+  if (!techId || !technicians.some((t) => t.id === techId)) {
+    return res.status(400).json({ error: 'a valid foreman (techId) is required' });
+  }
+  const repeat = [0, 7, 14].includes(Number(repeatDays)) ? Number(repeatDays) : 0;
+  const amount = Math.max(0, Math.round(Number(price) * 100) / 100 || 0);
+
+  const current = jobs[idx];
+  const updatedJob = {
+    ...current,
+    service: String(service || current.service || '').replace(/^Quote:\s*/i, '').slice(0, 80) || 'Lawn Service',
+    status: 'assigned',
+    assignedTo: techId,
+    scheduledDate,
+    repeatDays: repeat,
+    earnings: amount,
+    acceptedAt: new Date().toISOString(),
+  };
+  jobs[idx] = updatedJob;
   return res.json(updatedJob);
+});
+
+// Owner marks a finished cut paid (or un-paid if tapped by mistake).
+app.put('/api/jobs/:id/paid', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  const paid = req.body?.paid !== false;
+  jobs[idx] = { ...jobs[idx], paid, paidAt: paid ? new Date().toISOString() : null };
+  return res.json(jobs[idx]);
+});
+
+// ---- Expenses (gas, maintenance, other) ----
+
+// List without the photos; each receipt is fetched on its own when shown.
+app.get('/api/expenses', (_req, res) => {
+  res.json(expenses.map(({ receipt, ...e }) => ({ ...e, hasReceipt: Boolean(receipt) })));
+});
+
+app.get('/api/expenses/:id/receipt', (req, res) => {
+  const exp = expenses.find((e) => e.id === req.params.id);
+  const match = exp?.receipt?.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+  if (!match) return res.status(404).end();
+  res.type(match[1]).send(Buffer.from(match[2], 'base64'));
+});
+
+app.post('/api/expenses', (req, res) => {
+  const { techId, category, amount, date, note, receipt, logNow } = req.body || {};
+  const value = Math.round(Number(amount) * 100) / 100;
+  if (!EXPENSE_CATEGORIES.includes(category)) return res.status(400).json({ error: 'category must be gas, maintenance, or other' });
+  if (!(value > 0)) return res.status(400).json({ error: 'amount must be more than 0' });
+  if (receipt && !/^data:image\/(jpeg|png|webp);base64,/.test(receipt)) return res.status(400).json({ error: 'receipt must be a photo' });
+  if (receipt && receipt.length > 7_000_000) return res.status(413).json({ error: 'receipt photo is too large' });
+
+  const now = new Date().toISOString();
+  const exp = {
+    id: `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    techId: techId || null,
+    category,
+    amount: value,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? date : todayString(),
+    note: String(note || '').slice(0, 200),
+    receipt: receipt || null,
+    // Foreman expenses wait in the owner's To-Do; owner-entered ones go straight to the books.
+    status: logNow ? 'logged' : 'pending',
+    createdAt: now,
+    ...(logNow ? { loggedAt: now } : {}),
+  };
+  expenses.unshift(exp);
+  const { receipt: _r, ...listItem } = exp;
+  res.status(201).json({ ...listItem, hasReceipt: Boolean(exp.receipt) });
+});
+
+// Owner confirms (and can correct) a foreman's expense.
+app.put('/api/expenses/:id/log', (req, res) => {
+  const idx = expenses.findIndex((e) => e.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'expense not found' });
+  const { category, amount, date } = req.body || {};
+  const value = amount != null ? Math.round(Number(amount) * 100) / 100 : expenses[idx].amount;
+  if (!(value > 0)) return res.status(400).json({ error: 'amount must be more than 0' });
+  expenses[idx] = {
+    ...expenses[idx],
+    category: EXPENSE_CATEGORIES.includes(category) ? category : expenses[idx].category,
+    amount: value,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? date : expenses[idx].date,
+    status: 'logged',
+    loggedAt: new Date().toISOString(),
+  };
+  const { receipt, ...listItem } = expenses[idx];
+  return res.json({ ...listItem, hasReceipt: Boolean(receipt) });
+});
+
+app.put('/api/expenses/:id/reject', (req, res) => {
+  const idx = expenses.findIndex((e) => e.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'expense not found' });
+  expenses[idx] = { ...expenses[idx], status: 'rejected', rejectedAt: new Date().toISOString() };
+  const { receipt, ...listItem } = expenses[idx];
+  return res.json({ ...listItem, hasReceipt: Boolean(receipt) });
+});
+
+app.put('/api/jobs/:id/decline', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  jobs[idx] = { ...jobs[idx], status: 'declined', declinedAt: new Date().toISOString() };
+  return res.json(jobs[idx]);
 });
 
 app.put('/api/jobs/:id/assign', (req, res) => {

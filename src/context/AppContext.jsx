@@ -67,7 +67,7 @@ export function AppProvider({ children }) {
     await addDoc(col(db, 'jobs'), jobData);
   }, []);
 
-  const updateJobStatus = useCallback(async (jobId, status) => {
+  const updateJobStatus2 = useCallback(async (jobId, status) => {
     if (!FIREBASE_ENABLED) {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status } : j));
       return;
@@ -86,7 +86,7 @@ export function AppProvider({ children }) {
   }, []);
 
   return (
-    <AppContext.Provider value={{ user, setUser, role, setRole, demoMode, activeTechId, setActiveTechId, loginDemo, verifyDemoCredentials, logout, jobs, setJobs, createJob, updateJobStatus, assignJob }}>
+    <AppContext.Provider value={{ user, setUser, role, setRole, demoMode, activeTechId, setActiveTechId, loginDemo, verifyDemoCredentials, logout, jobs, setJobs, createJob, updateJobStatus2, assignJob }}>
       {children}
     </AppContext.Provider>
   );

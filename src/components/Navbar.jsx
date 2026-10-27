@@ -1,5 +1,6 @@
 import { useApp } from '../context/AppContext.jsx';
 import { useTechnicians } from '../hooks/useTechnicians.js';
+import { COMPANY_INFO } from '../data/services.js';
 
 export default function Navbar({ page, setPage }) {
   const { role, user, setUser, activeTechId, setActiveTechId, demoMode, logout } = useApp();
@@ -26,8 +27,10 @@ export default function Navbar({ page, setPage }) {
     <nav style={{
       background: 'var(--bg-surface)',
       borderBottom: '1px solid var(--border)',
-      padding: '0 24px',
-      height: '56px',
+      padding: '8px 16px',
+      minHeight: '56px',
+      flexWrap: 'wrap',
+      gap: '8px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -36,11 +39,11 @@ export default function Navbar({ page, setPage }) {
       zIndex: 100,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <span style={{ fontSize: '22px' }}>🦆</span>
-        <span style={{ fontWeight: 700, fontSize: '18px', color: 'var(--accent-teal)' }}>DuctTales</span>
+        <span style={{ fontSize: '22px' }}>🌱</span>
+        <span style={{ fontWeight: 700, fontSize: '18px', color: 'var(--accent-teal)', whiteSpace: 'nowrap' }}>{COMPANY_INFO.shortName}</span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', minWidth: 0 }}>
         {user && (
           <span style={{
             background: roleColor + '22',
@@ -52,13 +55,13 @@ export default function Navbar({ page, setPage }) {
             fontWeight: 600,
             textTransform: 'capitalize',
           }}>
-            {role}
+            {role === 'technician' ? 'Foreman' : role}
           </span>
         )}
         {user && (
           role === 'technician' && demoMode ? (
             <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              <span>Tech:</span>
+              <span>Foreman:</span>
               <select
                 value={activeTechId || ''}
                 onChange={e => handleSwitchTech(e.target.value)}
@@ -69,7 +72,8 @@ export default function Navbar({ page, setPage }) {
                   borderRadius: '8px',
                   padding: '5px 8px',
                   fontSize: '12px',
-                  minWidth: '170px',
+                  minWidth: 0,
+                  maxWidth: '160px',
                 }}
               >
                 {(demoTechs.length ? demoTechs : [{ id: 'tech-001', name: 'Marcus Williams' }]).map(tech => (

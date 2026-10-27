@@ -1,9 +1,16 @@
+import { useState } from 'react';
 import StatusBadge from './StatusBadge.jsx';
+import YardMap from './YardMap.jsx';
+import { formatSqFt } from '../lib/zones.js';
+import { relativeDay, repeatLabel } from '../lib/dates.js';
 import { JOB_STATUS } from '../lib/constants.js';
 
 export default function JobCard({ job, actions, expanded = false, onClick }) {
   const status = JOB_STATUS[job.status] || { label: job.status, color: '#8b949e' };
   const earnings = typeof job.earnings === 'number' ? `$${job.earnings.toFixed(2)}` : '';
+  const [showZones, setShowZones] = useState(false);
+  const quote = job.quote;
+  const quoteZones = quote?.zones?.map((z, i) => ({ ...z, id: `${job.id}-z${i}` })) || [];
 
   return (
     <div
@@ -19,6 +26,11 @@ export default function JobCard({ job, actions, expanded = false, onClick }) {
             </span>
             <StatusBadge label={status.label} color={status.color} />
           </div>
+          {job.scheduledDate && job.status !== 'completed' && (
+            <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: relativeDay(job.scheduledDate).startsWith('Overdue') ? '#ff7b72' : 'var(--accent-teal)' }}>
+              📅 {relativeDay(job.scheduledDate)}{job.repeatDays > 0 ? ` · ${repeatLabel(job.repeatDays)}` : ''}
+            </div>
+          )}
           <div style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '2px' }}>
             👤 {job.clientName} &nbsp;·&nbsp; 📞 {job.clientPhone}
           </div>
@@ -54,6 +66,27 @@ export default function JobCard({ job, actions, expanded = false, onClick }) {
           </div>
         </div>
       </div>
+
+      {quote?.zones?.length > 0 && (
+        <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span style={{ background: '#4ade8022', color: '#4ade80', border: '1px solid #4ade8044', borderRadius: '12px', padding: '2px 10px', fontSize: '12px', fontWeight: 700 }}>
+            📐 {formatSqFt(quote.totalSqFt)} · {quote.zones.length} zone{quote.zones.length === 1 ? '' : 's'}{quote.estimate && ['quote', 'pending'].includes(job.status) ? ` · est. $${quote.estimate}` : ''}
+          </span>
+          {quote.zones.map((z, i) => (
+            <span key={i} style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: z.color }} />{z.name}: {formatSqFt(z.sqFt)}
+            </span>
+          ))}
+          <button type="button" className="btn-ghost" onClick={e => { e.stopPropagation(); setShowZones(s => !s); }} style={{ padding: '3px 10px', fontSize: '12px' }}>
+            {showZones ? 'Hide Map' : '🗺️ View Zones'}
+          </button>
+        </div>
+      )}
+      {quote?.zones?.length > 0 && showZones && (
+        <div style={{ marginTop: '10px' }} onClick={e => e.stopPropagation()}>
+          <YardMap zones={quoteZones} readOnly height="280px" />
+        </div>
+      )}
 
       {expanded && job.notes && (
         <div style={{

@@ -68,8 +68,8 @@ export default function ServicePage({ serviceId, setPage }) {
             </>
           )}
         </div>
-        <button className="btn-primary" onClick={() => setPage('request-service')} style={{ padding: '12px 28px', fontSize: '15px' }}>
-          Request This Service
+        <button className="btn-primary" onClick={() => { setPage(`quote:${service.id}`); window.scrollTo(0, 0); }} style={{ padding: '12px 28px', fontSize: '15px' }}>
+          Request a Quote
         </button>
       </div>
     </div>

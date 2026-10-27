@@ -12,12 +12,8 @@ import Contact from './pages/Contact.jsx';
 import TechnicianView from './pages/TechnicianView.jsx';
 import ManagerView from './pages/ManagerView.jsx';
 import OwnerView from './pages/OwnerView.jsx';
-
-const SERVICE_PAGE_IDS = [
-  'furnace-repair', 'furnace-install', 'heating-maintenance',
-  'ac-repair', 'ac-install', 'ductless-systems', 'ac-maintenance',
-  'water-heater', 'indoor-air-quality', 'duct-cleaning', 'smart-thermostats',
-];
+import QuoteTool from './pages/QuoteTool.jsx';
+import { SERVICE_PAGE_IDS } from './data/services.js';
 
 function AppInner() {
   const [page, setPage] = useState('home');
@@ -32,11 +28,16 @@ function AppInner() {
     // Auth
     if (page === 'login') return <Login setPage={setPage} />;
 
+    // Request a Quote (the one way customers ask for service).
+    // 'quote:<service-id>' preselects that service.
+    if (page === 'quote' || page === 'request-service' || page.startsWith('quote:')) {
+      return <QuoteTool key={page} setPage={setPage} initialServiceId={page.split(':')[1]} />;
+    }
+
     // Service pages
     if (SERVICE_PAGE_IDS.includes(page)) return <ServicePage serviceId={page} setPage={setPage} />;
 
-    // Landing modes (request-service and technician-apply keep existing forms)
-    if (page === 'request-service') return <Landing setPage={setPage} mode="request" />;
+    // Technician applications
     if (page === 'technician-apply') return <Landing setPage={setPage} mode="apply" />;
 
     // Named pages

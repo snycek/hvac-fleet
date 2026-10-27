@@ -35,8 +35,8 @@ export default function Specials({ setPage }) {
       </div>
 
       <div style={{ marginTop: '32px', textAlign: 'center' }}>
-        <button className="btn-primary" onClick={() => setPage('request-service')} style={{ padding: '12px 28px', fontSize: '15px' }}>
-          Request Service Now
+        <button className="btn-primary" onClick={() => { setPage('quote'); window.scrollTo(0, 0); }} style={{ padding: '12px 28px', fontSize: '15px' }}>
+          Request a Quote
         </button>
       </div>
     </div>

@@ -7,15 +7,15 @@ const DEMO_ROLES = [
     role: 'technician',
     techId: 'tech-001',
     icon: '🔧',
-    title: 'Technician',
-    desc: 'View assigned jobs, update status, mark jobs complete',
+    title: 'Foreman',
+    desc: 'See your cuts for today, navigate there, mark yards cut',
     color: '#0fd3c3',
   },
   {
     role: 'manager',
     icon: '📋',
     title: 'Manager',
-    desc: 'Assign incoming jobs to available technicians',
+    desc: 'Assign jobs to foremen and approve new crew',
     color: '#1f6feb',
   },
   {
@@ -71,8 +71,8 @@ export default function Login({ setPage }) {
       padding: '40px 24px',
     }}>
       <div style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🦆</div>
-        <h1 style={{ fontSize: '30px', fontWeight: 700, marginBottom: '10px' }}>DuctTales Portal</h1>
+        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🌱</div>
+        <h1 style={{ fontSize: '30px', fontWeight: 700, marginBottom: '10px' }}>John's Lawn Portal</h1>
         <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '15px' }}>
           Enter your credentials, then select a role to enter the portal.
         </p>
@@ -130,7 +130,7 @@ export default function Login({ setPage }) {
         </div>
 
         <div className="card" style={{ marginBottom: '16px', padding: '14px 16px', textAlign: 'left' }}>
-          <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Technician Login Profile</label>
+          <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Foreman Login Profile</label>
           <select className="form-input" value={selectedTechId} onChange={e => setSelectedTechId(e.target.value)}>
             {(selectableTechs.length ? selectableTechs : [{ id: 'tech-001', name: 'Marcus Williams' }]).map(tech => (
               <option key={tech.id} value={tech.id}>{tech.name}</option>

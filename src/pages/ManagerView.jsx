@@ -46,7 +46,7 @@ function AssignModal({ job, technicians, onAssign, onClose }) {
 
         {available.length === 0 ? (
           <div style={{ color: '#d29922', background: '#d2992222', border: '1px solid #d2992244', borderRadius: '8px', padding: '12px 16px', fontSize: '14px', marginBottom: '20px' }}>
-            No technicians are currently available. All techs are on jobs or offline.
+            No foremen are currently available. Everyone is on a job or offline.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
@@ -74,7 +74,7 @@ function AssignModal({ job, technicians, onAssign, onClose }) {
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary" onClick={() => onAssign(job.id, selectedTechId)} disabled={!selectedTechId}>
-            Assign Technician
+            Assign Foreman
           </button>
         </div>
       </div>
@@ -108,7 +108,7 @@ export default function ManagerView() {
       <div style={{ marginBottom: '28px' }}>
         <h1 style={{ fontSize: '26px', fontWeight: 700, marginBottom: '6px' }}>Manager Console</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
-          Track live fleet locations, approve new technicians, and assign incoming service requests.
+          Track live fleet locations, approve new crew, and assign jobs to foremen.
         </p>
       </div>
 
@@ -117,7 +117,7 @@ export default function ManagerView() {
         {[
           { label: 'Pending',   value: pendingJobs.length,                                          color: '#d29922' },
           { label: 'Active',    value: activeJobs.length,                                           color: '#1f6feb' },
-          { label: 'Available Techs', value: technicians.filter(t => t.status === 'available').length, color: '#3fb950' },
+          { label: 'Available Foremen', value: technicians.filter(t => t.status === 'available').length, color: '#3fb950' },
           { label: 'Awaiting Approval', value: pendingApplicants.length,                             color: '#d29922' },
         ].map(s => (
           <div key={s.label} className="card" style={{ textAlign: 'center', padding: '14px 10px' }}>
@@ -132,7 +132,7 @@ export default function ManagerView() {
         <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>Live Fleet Map</h2>
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-muted)' }}>
-            Click a truck marker to view technician status and current job details.
+            Click a truck marker to view the foreman's status and current job.
           </div>
           <div style={{ height: '500px' }}>
             <FleetMap technicians={technicians} jobs={jobs} />
@@ -164,7 +164,7 @@ export default function ManagerView() {
                   job={job}
                   actions={
                     <button className="btn-primary" onClick={() => setAssigningJob(job)} style={{ padding: '8px 18px', fontSize: '13px' }}>
-                      Assign Technician
+                      Assign Foreman
                     </button>
                   }
                 />
@@ -176,7 +176,7 @@ export default function ManagerView() {
         {/* Technician Applicants */}
         <div>
           <h2 style={{ fontSize: '18px', fontWeight: 600, marginBottom: '12px' }}>
-            Technician Applications
+            Crew Applications
             {pendingApplicants.length > 0 && (
               <span style={{ marginLeft: '10px', background: '#d2992233', color: '#d29922', border: '1px solid #d2992244', borderRadius: '20px', padding: '2px 10px', fontSize: '12px' }}>
                 {pendingApplicants.length}
@@ -186,7 +186,7 @@ export default function ManagerView() {
 
           {pendingApplicants.length === 0 ? (
             <div className="card" style={{ padding: '16px', color: 'var(--text-muted)', fontSize: '14px' }}>
-              No new technician applications.
+              No new crew applications.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>

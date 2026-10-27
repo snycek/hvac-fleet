@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { TECH_STATUS } from '../lib/constants.js';
+import { lawnKey, lawnStats } from '../lib/lawns.js';
 
 // Fix Leaflet default icon URLs broken by Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -100,7 +101,11 @@ function buildPopup(tech, jobs, statusInfo, color) {
   // fallback: if no "today" completed jobs, show all completed (demo data)
   const completedForEarnings = completedToday.length ? completedToday : techJobs.filter(j => j.status === 'completed');
   const dailyEarnings = completedForEarnings.reduce((s, j) => s + (j.earnings || 0), 0);
-  const activeJob = techJobs.find(j => ['assigned', 'en_route', 'in_progress'].includes(j.status));
+  // The lawn they're on (cutting first, then driving to, then next up).
+  const activeJob = ['in_progress', 'en_route', 'assigned'].map(s => techJobs.find(j => j.status === s)).find(Boolean);
+  const lawn = activeJob ? lawnStats(jobs, lawnKey(activeJob)) : null;
+  const doing = { in_progress: '✂️ Cutting', en_route: '🚚 Heading to', assigned: '📅 Next' }[activeJob?.status] || '';
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   const statusDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:5px;vertical-align:middle"></span>`;
 
@@ -123,19 +128,25 @@ function buildPopup(tech, jobs, statusInfo, color) {
         </div>
         <div style="background:#f5f5f5;border-radius:8px;padding:8px 10px;text-align:center">
           <div style="font-size:16px;font-weight:800;color:#1a5cbf">${totalCompleted}</div>
-          <div style="font-size:10px;color:#888;margin-top:1px">Jobs Done</div>
+          <div style="font-size:10px;color:#888;margin-top:1px">Cuts Done</div>
         </div>
       </div>
 
       ${activeJob ? `
-        <div style="background:#fff8f0;border:1px solid #e6c07b;border-radius:8px;padding:8px 10px;font-size:12px">
-          <div style="font-weight:600;color:#b85c0f;margin-bottom:2px">🔧 Current Job</div>
-          <div style="color:#555">${activeJob.service}</div>
-          <div style="color:#888;margin-top:2px;font-size:11px">📍 ${activeJob.address}</div>
+        <div style="background:#f6fbf7;border:1px solid #9fd8ac;border-radius:8px;padding:8px 10px;font-size:12px">
+          <div style="font-weight:700;color:#2d7a3a;margin-bottom:2px">${doing} · ${esc(activeJob.clientName)}</div>
+          <div style="color:#888;font-size:11px;margin-bottom:6px">📍 ${esc(String(activeJob.address).split(',')[0])}</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center">
+            <div><div style="font-weight:800;color:#111">${lawn.cuts}</div><div style="font-size:9px;color:#888">cuts</div></div>
+            <div><div style="font-weight:800;color:#111">${lawn.avgMinutes != null ? lawn.avgMinutes + 'm' : '—'}</div><div style="font-size:9px;color:#888">avg</div></div>
+            <div><div style="font-weight:800;color:#2d7a3a">$${Math.round(lawn.paid)}</div><div style="font-size:9px;color:#888">paid</div></div>
+            <div><div style="font-weight:800;color:${lawn.owed ? '#b7791f' : '#888'}">$${Math.round(lawn.owed)}</div><div style="font-size:9px;color:#888">owed</div></div>
+          </div>
+          ${lawn.notes ? `<div style="margin-top:6px;color:#555">📝 ${esc(lawn.notes)}</div>` : ''}
         </div>
       ` : `
         <div style="background:#f0fff4;border:1px solid #86d998;border-radius:8px;padding:8px 10px;font-size:12px;color:#2d7a3a;text-align:center">
-          ✅ Available for dispatch
+          ✅ No cuts left
         </div>
       `}
     </div>`;

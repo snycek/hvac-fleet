@@ -698,3 +698,17 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 
 /* New quote requests waiting: green badge on the Quotes tab */
 .tab-count.new { background: #3fb95033; color: #3fb950; border-color: #3fb95066; }
+
+/* Payroll: ▸ pay history per person + stubs */
+.pay-toggle { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 6px 0 0; font-size: 12px; }
+.pay-toggle:hover, .pay-toggle[aria-expanded="true"] { color: var(--accent-teal); }
+.pay-history-row > td { background: var(--bg-primary); padding: 8px 12px 12px 28px !important; text-align: left !important; }
+.pay-history { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
+.pay-history-head { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.pay-history table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pay-history th { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+.pay-history td { padding: 5px 6px; border-bottom: 1px solid var(--border); text-align: right; }
+.pay-history .left { text-align: left; }
+.pay-history-empty { color: var(--text-muted); font-size: 13px; }
+.pay-stub-btn { padding: 2px 9px; font-size: 12px; }
+.stub-sheet { min-height: 0; }

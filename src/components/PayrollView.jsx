@@ -1,7 +1,8 @@
 import { Fragment, useMemo, useState } from 'react';
 import { addDays, todayString } from '../lib/dates.js';
 import { money } from '../lib/lawns.js';
-import { OVERTIME_AFTER, billedInWeek, buildPayroll, fmtHours, weekDates } from '../lib/payroll.js';
+import { OVERTIME_AFTER, billedInWeek, buildPayroll, fmtHours, weekDates, payHistory } from '../lib/payroll.js';
+import PayStub from './PayStub.jsx';
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const md = d => new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
@@ -119,10 +120,52 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
   );
 }
 
+/** One person's pay, week by week (last 26 weeks), with a stub for each week. */
+function PayHistory({ employee, data, today, onStub, onPaid }) {
+  const weeks = useMemo(() => payHistory(employee, data, today), [employee, data, today]);
+  const year = today.slice(0, 4);
+  const ytdThrough = ws => weeks.filter(w => w.weekStart.slice(0, 4) === year && w.weekStart <= ws).reduce((s, w) => s + w.gross, 0);
+  const ytd = weeks.filter(w => w.weekStart.slice(0, 4) === year).reduce((s, w) => s + w.gross, 0);
+  const owed = weeks.filter(w => !w.paidAt).reduce((s, w) => s + w.gross, 0);
+  const range = w => `${md(w.weekStart)} – ${md(w.weekEnd)}`;
+  if (!weeks.length) return <div className="pay-history-empty">No hours on record yet.</div>;
+  return (
+    <div className="pay-history">
+      <div className="pay-history-head">
+        <b>Pay history · {employee.name}</b>
+        <span>{year} to date <b>{money(ytd, true)}</b></span>
+        {owed > 0 && <span style={{ color: '#f0b429' }}>Owed <b>{money(owed, true)}</b></span>}
+        <span className="muted">{weeks.length} week{weeks.length === 1 ? '' : 's'} · gross, before taxes</span>
+      </div>
+      <table>
+        <thead><tr><th className="left">Week</th><th>Hours</th><th>OT</th><th>Gross</th><th>Status</th><th /></tr></thead>
+        <tbody>
+          {weeks.map(w => (
+            <tr key={w.weekStart}>
+              <td className="left">{range(w)}</td>
+              <td className="num">{fmtHours(w.total)}</td>
+              <td className="num" style={{ color: w.overtime ? '#f0b429' : 'var(--text-muted)' }}>{fmtHours(w.overtime)}</td>
+              <td className="num strong">{money(w.gross, true)}</td>
+              <td>
+                {w.paidAt
+                  ? <button type="button" className="pay-paid" title="Undo paid" onClick={() => onPaid(w.weekStart, false)}>✓ Paid {shortDate(w.paidAt)}</button>
+                  : <button type="button" className="pay-mark" onClick={() => onPaid(w.weekStart, true)}>Mark paid</button>}
+              </td>
+              <td><button type="button" className="btn-ghost pay-stub-btn" onClick={() => onStub(w, ytdThrough(w.weekStart))}>🧾 Stub</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Crew & Payroll: roster on the left, the week's timesheet + pay on the right. */
 export default function PayrollView({ technicians, jobs, shifts, delays, payroll, today = todayString() }) {
-  const { employees, settings, addEmployee, updateEmployee, setHours, setPaid, setPayRain } = payroll;
+  const { employees, settings, addEmployee, updateEmployee, setHours, setPaid } = payroll;
   const [anchor, setAnchor] = useState(null); // null = this week
+  const [openPerson, setOpenPerson] = useState(null); // employee id whose pay history is showing
+  const [stub, setStub] = useState(null); // { employee, crewName, stub, ytd }
   const week = weekDates(anchor || today);
   const weekStart = week[0];
   const isThisWeek = week.includes(today);
@@ -154,6 +197,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
 
   return (
     <div className="payroll">
+      {stub && <PayStub {...stub} onClose={() => setStub(null)} />}
       <section className="dash-panel">
         <div className="dash-panel-head">
           <span className="dash-panel-title">👷 Crews</span>
@@ -173,15 +217,10 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
             <button type="button" className="btn-ghost" aria-label="Next week" disabled={isThisWeek} onClick={() => setAnchor(addDays(weekStart, 7))}>›</button>
             {!isThisWeek && <button type="button" className="btn-ghost" onClick={() => setAnchor(null)}>This week</button>}
           </div>
-          <label className="pay-switch" title="Count rain-delay time as paid hours">
-            <input type="checkbox" checked={!!settings.payRain} onChange={e => setPayRain(e.target.checked)} />
-            <span>Pay rain delays</span>
-          </label>
           <button type="button" className="btn-primary" disabled={!unpaidIds.length}
             onClick={() => { if (window.confirm(`Mark ${unpaidIds.length} people paid for ${weekLabel}? (${money(totals.unpaid)})`)) setPaid(weekStart, unpaidIds, true); }}>
             ✓ Mark all paid
           </button>
-          <button type="button" className="btn-ghost" disabled title="Coming soon: printable pay stubs for each person">🧾 Pay stubs</button>
         </div>
 
         <div className="pay-summary">
@@ -223,9 +262,13 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
                       <td>{money(crewGross)}</td>
                       <td />
                     </tr>
-                    {crewRows.map(r => (
-                      <tr key={r.employee.id} className={r.paidAt ? 'is-paid' : undefined}>
+                    {crewRows.map(r => {
+                      const open = openPerson === r.employee.id;
+                      return (
+                      <Fragment key={r.employee.id}>
+                      <tr className={r.paidAt ? 'is-paid' : undefined}>
                         <td className="left">
+                          <button type="button" className="pay-toggle" aria-expanded={open} onClick={() => setOpenPerson(open ? null : r.employee.id)} title="Pay history & stubs">{open ? '▾' : '▸'}</button>
                           <span className="pay-name">{r.employee.name}</span>
                           {r.employee.role === 'foreman' && <span className="role-chip">{crew.kind === 'plow' ? 'Driver' : 'Foreman'}</span>}
                         </td>
@@ -244,7 +287,18 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
                           ) : <span className="muted">—</span>}
                         </td>
                       </tr>
-                    ))}
+                      {open && (
+                        <tr className="pay-history-row">
+                          <td colSpan={week.length + 6}>
+                            <PayHistory employee={r.employee} crewName={`${crew.name}'s crew`} data={{ jobs, shifts, delays, settings }} today={today}
+                              onStub={(s, ytd) => setStub({ employee: r.employee, crewName: `${crew.name}'s crew`, stub: s, ytd })}
+                              onPaid={(ws, paid) => setPaid(ws, [r.employee.id], paid)} />
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
+                      );
+                    })}
                   </Fragment>
                 );
               })}
@@ -262,7 +316,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
           </table>
         </div>
         <div className="dash-panel-foot pay-foot">
-          Hours come from each truck's day (rolled out → back at shop){settings.payRain ? '' : ', minus rain delays'}. Amber cells differ from the truck's day (owner or foreman changed them) — ↺ puts them back. Overtime after {OVERTIME_AFTER} h at 1.5×.
+          Hours come from each truck's day (rolled out → back at shop), minus rain delays. Amber cells differ from the truck's day (owner or foreman changed them) — ↺ puts them back. Overtime after {OVERTIME_AFTER} h at 1.5×.
         </div>
       </section>
     </div>

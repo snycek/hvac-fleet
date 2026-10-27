@@ -110,3 +110,19 @@ export function laborExpenses({ employees, jobs, shifts, delays, settings, today
     derived: true,
   }));
 }
+
+/**
+ * One person's pay, week by week (newest first), back up to `weeksBack` weeks — the same
+ * hours, rate and overtime as the weekly timesheet. Weeks with no hours are skipped.
+ */
+export function payHistory(employee, { jobs, shifts, delays, settings }, today = todayString(), weeksBack = 26) {
+  const out = [];
+  let monday = periodRange('week', today).from;
+  for (let i = 0; i < weeksBack; i++, monday = addDays(monday, -7)) {
+    const week = weekDates(monday);
+    const [row] = buildPayroll({ employees: [employee], week, jobs, shifts, delays, settings });
+    if (!row || (!row.total && !row.paidAt)) continue;
+    out.push({ weekStart: week[0], weekEnd: week[6], ...row });
+  }
+  return out;
+}

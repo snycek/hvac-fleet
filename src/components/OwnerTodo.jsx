@@ -218,7 +218,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               ))}
               <input inputMode="numeric" placeholder="Custom" aria-label="Custom days late" value={customLate}
                 onChange={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setCustomLate(v); setLateMin(Number(v) || 0); setBulk({ open: false, busy: false, done: '' }); }} />
-              {(lateMin > 0 || q) && <span className="cust-dim">{accounts.length} account{accounts.length === 1 ? '' : 's'} · {shownUnpaid.length} cut{shownUnpaid.length === 1 ? '' : 's'}</span>}
+              {(lateMin > 0 || q) && <span className="cust-dim">{accounts.length} account{accounts.length === 1 ? '' : 's'} · {shownUnpaid.length} visit{shownUnpaid.length === 1 ? '' : 's'}</span>}
             </div>
             <div className="late-filter">
               <span className="cust-dim">Address</span>
@@ -257,6 +257,10 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 const late = acct.oldestDays >= PAST_DUE_DAYS;
                 const open = openAcct === acct.key;
                 const n = acct.jobs.length;
+                // Plow customers get pushes, not cuts.
+                const snow = acct.latest.service === 'Snow Removal';
+                const unit = snow ? (n === 1 ? 'push' : 'pushes') : (n === 1 ? 'cut' : 'cuts');
+                const icon = snow ? '❄️' : '✂️';
                 return (
                 <div key={acct.key} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 170px', minWidth: 0 }}>
@@ -268,8 +272,8 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     )}
                   </span>
                   <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
-                    style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? 'Show each cut' : `Cut ${shortDate(acct.jobs[0].completedAt)}`}>
-                    {n > 1 ? (open ? '▾' : '▸') : '✂️'} {n > 1 ? `${n} cuts · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d
+                    style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? `Show each ${snow ? 'push' : 'cut'}` : `${snow ? 'Plowed' : 'Cut'} ${shortDate(acct.jobs[0].completedAt)}`}>
+                    {n > 1 ? (open ? '▾' : '▸') : icon} {n > 1 ? `${n} ${unit} · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d
                   </button>
                   <span style={{ fontWeight: 700, width: '62px', textAlign: 'right' }}>{money(acct.balance)}</span>
                   <span className="row-actions">
@@ -284,13 +288,13 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   )}
                   <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}
                     aria-expanded={choosing === acct.key} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}
-                    title={n > 1 ? `Mark all ${n} cuts paid (${money(acct.balance)})` : 'Mark paid'}>
+                    title={n > 1 ? `Mark all ${n} ${unit} paid (${money(acct.balance)})` : 'Mark paid'}>
                     {paying === acct.key ? '…' : n > 1 ? 'Mark all paid' : 'Mark paid'}
                   </button>
                   </span>
                   {choosing === acct.key && (
                     <div className="pay-choose">
-                      <span>{n > 1 ? `All ${n} cuts · ${money(acct.balance)} paid by` : 'Paid by'}</span>
+                      <span>{n > 1 ? `All ${n} ${unit} · ${money(acct.balance)} paid by` : 'Paid by'}</span>
                       <button type="button" onClick={() => recordAll(acct, 'cash')}>{METHODS.cash.icon} Cash</button>
                       <button type="button" onClick={() => recordAll(acct, 'check')}>{METHODS.check.icon} Check</button>
                       <span className="pay-choose-card">
@@ -307,7 +311,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                         const d = daysSinceCut(job, today);
                         return (
                           <div key={job.id} className="acct-cut">
-                            <span className={d >= PAST_DUE_DAYS ? 'cust-warn' : 'cust-dim'}>✂️ {shortDate(job.completedAt)} · {d}d</span>
+                            <span className={d >= PAST_DUE_DAYS ? 'cust-warn' : 'cust-dim'}>{icon} {shortDate(job.completedAt)} · {d}d</span>
                             <span style={{ fontWeight: 600 }}>{money(job.earnings || 0)}</span>
                             <span className="acct-cut-pay">
                               <span className="cust-dim">Paid:</span>

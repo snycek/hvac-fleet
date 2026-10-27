@@ -88,8 +88,15 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   };
   const [reminding, setReminding] = useState(null);
   // "Remind all 30+ days": one reminder per customer, skipping anyone reminded this week.
-  const behind = pastDueCustomers(jobs, today);
-  const toRemind = behind.filter(c => !c.recentlyReminded);
+  // Days-late filter (All / 30+ / 45+ / 60+ / 90+ / any number): narrows the Unpaid
+  // list and picks who "Remind all" goes to (All = the usual 30+ past-due rule).
+  const [lateMin, setLateMin] = useState(0);
+  const [customLate, setCustomLate] = useState('');
+  const [includeRecent, setIncludeRecent] = useState(false);
+  const threshold = lateMin || PAST_DUE_DAYS;
+  const shownUnpaid = lateMin ? unpaid.filter(j => daysSinceCut(j, today) >= lateMin) : unpaid;
+  const behind = pastDueCustomers(jobs, today, threshold);
+  const toRemind = includeRecent ? behind : behind.filter(c => !c.recentlyReminded);
   const [bulk, setBulk] = useState({ open: false, busy: false, done: '' });
   const remindAll = async () => {
     setBulk(b => ({ ...b, busy: true }));
@@ -166,13 +173,29 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               Unpaid · {unpaid.length} · {money(unpaidTotal)}
               {pastDue.length > 0 && <span className="past-due-count" title={`${pastDue.length} cut${pastDue.length === 1 ? '' : 's'} unpaid ${PAST_DUE_DAYS}+ days`}> · ⚠️ {pastDue.length} past {PAST_DUE_DAYS} days</span>}
             </h3>
+            <div className="late-filter" role="group" aria-label="Days late">
+              <span className="cust-dim">Days late</span>
+              {[0, 30, 45, 60, 90].map(d => (
+                <button key={d} type="button" aria-pressed={lateMin === d && !customLate} onClick={() => { setLateMin(d); setCustomLate(''); setBulk({ open: false, busy: false, done: '' }); }}>
+                  {d ? `${d}+` : 'All'}
+                </button>
+              ))}
+              <input inputMode="numeric" placeholder="Custom" aria-label="Custom days late" value={customLate}
+                onChange={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setCustomLate(v); setLateMin(Number(v) || 0); setBulk({ open: false, busy: false, done: '' }); }} />
+              {lateMin > 0 && <span className="cust-dim">{shownUnpaid.length} cut{shownUnpaid.length === 1 ? '' : 's'} · {behind.length} customer{behind.length === 1 ? '' : 's'}</span>}
+            </div>
             {remindAccounts && behind.length > 0 && (
               <div className="remind-all">
                 <button type="button" className="btn-ghost remind-btn" disabled={!toRemind.length || bulk.busy} onClick={() => setBulk({ open: !bulk.open, busy: false, done: '' })}
-                  title={toRemind.length ? 'One reminder per customer, with their pay link' : `Everyone 30+ days behind was reminded in the last ${REMIND_GAP_DAYS} days`}>
-                  🔔 Remind all {PAST_DUE_DAYS}+ days ({toRemind.length})
+                  title={toRemind.length ? 'One reminder per customer, with their pay link' : `Everyone ${threshold}+ days behind was reminded in the last ${REMIND_GAP_DAYS} days`}>
+                  🔔 Remind all {threshold}+ days ({toRemind.length})
                 </button>
-                {behind.length > toRemind.length && <span className="cust-dim">{behind.length - toRemind.length} reminded in the last {REMIND_GAP_DAYS} days — skipped</span>}
+                {behind.some(c => c.recentlyReminded) && (
+                  <label className="cust-dim remind-include">
+                    <input type="checkbox" checked={includeRecent} onChange={e => setIncludeRecent(e.target.checked)} />
+                    Include {behind.filter(c => c.recentlyReminded).length} already reminded in the last {REMIND_GAP_DAYS} days
+                  </label>
+                )}
                 {bulk.done && <span className="remind-done">{bulk.done}</span>}
                 {bulk.open && toRemind.length > 0 && (
                   <div className="remind-confirm">
@@ -180,7 +203,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     <div className="cust-dim">{toRemind.slice(0, 6).map(c => `${c.name} (${money(c.balance)})`).join(' · ')}{toRemind.length > 6 ? ` · +${toRemind.length - 6} more` : ''}</div>
                     <div className="remind-preview">Each gets their own total and pay link, e.g.: “Hi {String(toRemind[0].name).split(' ')[0]}, … your account has {money(toRemind[0].balance)} open … Pay anytime here: [their link]”</div>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <button type="button" className="btn-primary" disabled={bulk.busy} onClick={remindAll} style={{ padding: '5px 14px', fontSize: '12px' }}>{bulk.busy ? 'Sending…' : `Send ${toRemind.length}`}</button>
+                      <button type="button" className="btn-primary" disabled={bulk.busy} onClick={remindAll} style={{ padding: '5px 14px', fontSize: '12px' }}>{bulk.busy ? 'Sending…' : `Send ${toRemind.length} reminder${toRemind.length === 1 ? '' : 's'}`}</button>
                       <button type="button" className="btn-ghost" onClick={() => setBulk({ open: false, busy: false, done: '' })} style={{ padding: '5px 12px', fontSize: '12px' }}>Cancel</button>
                     </div>
                   </div>
@@ -188,7 +211,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               </div>
             )}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              {(showAllUnpaid ? unpaid : unpaid.slice(0, UNPAID_PREVIEW)).map((job, i) => {
+              {(showAllUnpaid ? shownUnpaid : shownUnpaid.slice(0, UNPAID_PREVIEW)).map((job, i) => {
                 const days = daysSinceCut(job, today);
                 const late = days >= PAST_DUE_DAYS;
                 const lastReminder = job.reminders?.[job.reminders.length - 1];
@@ -236,9 +259,9 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 );
               })}
             </div>
-            {unpaid.length > UNPAID_PREVIEW && (
+            {shownUnpaid.length > UNPAID_PREVIEW && (
               <button type="button" className="btn-ghost" onClick={() => setShowAllUnpaid(s => !s)} style={{ marginTop: '8px', padding: '6px 12px', fontSize: '12px' }}>
-                {showAllUnpaid ? 'Show less' : `Show ${unpaid.length - UNPAID_PREVIEW} more`}
+                {showAllUnpaid ? 'Show less' : `Show ${shownUnpaid.length - UNPAID_PREVIEW} more`}
               </button>
             )}
           </div>

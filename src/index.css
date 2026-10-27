@@ -624,3 +624,11 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 @media not all and (min-width: 1200px) and (min-height: 700px) {
   .dash-kpis.view-hub .kpi-crew { display: none; }
 }
+
+/* Unpaid: days-late filter */
+.late-filter { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin: -2px 0 8px; font-size: 12px; }
+.late-filter > span:first-child { margin-right: 4px; }
+.late-filter button { background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-muted); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.late-filter button[aria-pressed="true"] { color: #f0b429; border-color: #f0b42988; background: #f0b4291a; }
+.late-filter input { width: 64px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+.remind-include { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }

@@ -82,7 +82,7 @@ export function customerHistory({ jobs, payments = [], key, today }) {
 export const methodLabel = r => (r.card ? r.card : (METHODS[r.method]?.label || r.method));
 
 /** Customers 30+ days behind, one entry each, with their open cuts. */
-export function pastDueCustomers(jobs, today) {
+export function pastDueCustomers(jobs, today, minDays = PAST_DUE_DAYS) {
   const byKey = new Map();
   for (const j of jobs) {
     if (j.status !== 'completed' || j.paid) continue;
@@ -95,7 +95,7 @@ export function pastDueCustomers(jobs, today) {
   for (const [key, open] of byKey) {
     open.sort((a, b) => serviceDate(a).localeCompare(serviceDate(b)));
     const oldest = days(serviceDate(open[0]), today);
-    if (oldest < PAST_DUE_DAYS) continue;
+    if (oldest < minDays) continue;
     const last = contactsFor(jobs.filter(j => lawnKey(j) === key))[0];
     const recentlyReminded = !!last && String(last.at).slice(0, 10) > addDays(today, -REMIND_GAP_DAYS);
     const latest = open[open.length - 1];

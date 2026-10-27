@@ -237,6 +237,20 @@ export default function OwnerView() {
 
   // New quote requests have their own tab now.
   const quoteCount = useMemo(() => allJobs.filter(j => j.status === 'quote').length, [allJobs]);
+  // A new quote request came in (count went up after the hub loaded): bring the Quotes
+  // tab forward, open the panel if it's folded, and flash it. Not on first load.
+  const [quoteSeen, setQuoteSeen] = useState({ count: null, demo: demoOn });
+  const [quoteFlash, setQuoteFlash] = useState(0);
+  if (quoteSeen.demo !== demoOn || (quoteSeen.count === null && allJobs.length > 0)) {
+    setQuoteSeen({ count: allJobs.length > 0 ? quoteCount : null, demo: demoOn });
+  } else if (quoteSeen.count !== null && quoteCount !== quoteSeen.count) {
+    setQuoteSeen({ count: quoteCount, demo: demoOn });
+    if (quoteCount > quoteSeen.count) {
+      setLeftTab('quotes');
+      setQuoteFlash(n => n + 1);
+      if (collapsed.todo) setCollapsed(c => ({ ...c, todo: false }));
+    }
+  }
   const todoCount = useMemo(() => (
     expenses.filter(e => e.status === 'pending').length
     + new Set(jobs.filter(j => j.status === 'completed' && !j.paid).map(lawnKey)).size
@@ -351,7 +365,8 @@ export default function OwnerView() {
       <div className="dash-main" style={gridVars}>
         {/* 1. To-Do / Lawns */}
         <div className="dash-col">
-          <section className={`dash-panel${fold('todo')}`}>
+          <section className={`dash-panel${fold('todo')}`} style={{ position: 'relative' }}>
+            {quoteFlash > 0 && <span key={quoteFlash} className="panel-flash" aria-hidden="true" />}
             <div className="dash-panel-head">
               <CollapseButton collapsed={collapsed.todo} onToggle={() => toggle('todo')} label="To-Do" />
               <div className="dash-tabs" role="tablist">

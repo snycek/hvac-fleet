@@ -561,6 +561,15 @@ app.post('/api/payments/charge', (req, res) => {
   return res.json({ payment: next.payment });
 });
 
+// At most one payment reminder per customer (service address) per week.
+const REMIND_EVERY_MS = 7 * 24 * 3600 * 1000;
+function lastReminderAt(key) {
+  let last = '';
+  for (const j of jobs) if (lawnKey(j) === key) for (const r of j.reminders || []) if (String(r.at) > last) last = String(r.at);
+  return last || null;
+}
+const remindedThisWeek = (key) => { const last = lastReminderAt(key); return last && Date.now() - new Date(last).getTime() < REMIND_EVERY_MS ? last : null; };
+
 // Payment reminder to the customer for an unpaid cut. Logged on the job with the exact
 // message. (Customer texting/email isn't connected yet — this records it and prints it.)
 app.post('/api/jobs/:id/remind', (req, res) => {
@@ -568,6 +577,8 @@ app.post('/api/jobs/:id/remind', (req, res) => {
   if (idx < 0) return res.status(404).json({ error: 'job not found' });
   const job = jobs[idx];
   if (job.status !== 'completed' || job.paid) return res.status(400).json({ error: 'only unpaid finished cuts get reminders' });
+  const recent = remindedThisWeek(lawnKey(job));
+  if (recent) return res.status(429).json({ error: `Already reminded ${new Date(recent).toLocaleDateString('en-US')} — one reminder per week.` });
   const channel = ['text', 'email'].includes(req.body?.channel) ? req.body.channel : 'text';
   const message = String(req.body?.message || '').slice(0, 500);
   const to = channel === 'email' ? (job.clientEmail || job.email || '') : (job.clientPhone || '');
@@ -593,6 +604,7 @@ app.post('/api/reminders', (req, res) => {
     });
     if (!ids.length) return;
     const first = jobs.find((x) => x.id === ids[0]);
+    if (remindedThisWeek(lawnKey(first))) return; // one reminder per customer per week
     const channel = ['text', 'email'].includes(item.channel) ? item.channel : 'text';
     const to = channel === 'email' ? (first.clientEmail || first.email || '') : (first.clientPhone || '');
     const link = `${origin}/pay/${portalToken(lawnKey(first))}`;

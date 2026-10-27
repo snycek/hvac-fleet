@@ -177,6 +177,43 @@ const declinesFirst = key => hash(`${key}!`) % 14 === 0;
 
 const cutMinutes = key => 16 + (hash(key) % 15); // 16–30 min per residential lawn
 
+// Standard outlines for demo customers (as if they'd outlined them on the website):
+// lawns get a front and back yard box sized to their price ($5 per 500 sq ft);
+// plow lots use their real parking-lot shape. Cached so every visit shares one copy.
+const outlineCache = new Map();
+function lawnOutline(lawn) {
+  if (outlineCache.has(lawn.id)) return outlineCache.get(lawn.id);
+  const total = Math.max(1200, Math.round((lawn.price / 5) * 500 - (hash(lawn.id) % 400)));
+  const front = Math.round(total * (0.35 + (hash(`${lawn.id}f`) % 15) / 100));
+  const back = total - front;
+  const mLat = 1 / 111320;
+  const mLng = 1 / (111320 * Math.cos((lawn.lat * Math.PI) / 180));
+  const box = (name, color, sqFt, top) => {
+    const w = 18; // meters wide (a typical lot)
+    const h = sqFt / 10.7639 / w;
+    const t0 = lawn.lat + top * mLat;
+    const b0 = t0 - h * mLat;
+    const l0 = lawn.lng - (w / 2) * mLng;
+    const r0 = lawn.lng + (w / 2) * mLng;
+    return { name, color, sqFt, points: [[t0, l0], [t0, r0], [b0, r0], [b0, l0]] };
+  };
+  const frontH = front / 10.7639 / 18;
+  const zones = [
+    box('Front Yard', '#4ade80', front, frontH / 2),           // centered on the address
+    box('Back Yard', '#38bdf8', back, -(frontH / 2 + 12)),     // behind the house (~12 m)
+  ];
+  const quote = { totalSqFt: total, estimate: lawn.price, wanted: ['Lawn Cutting'], center: { lat: lawn.lat, lng: lawn.lng }, zones };
+  outlineCache.set(lawn.id, quote);
+  return quote;
+}
+function lotOutline(lot) {
+  const key = `lot:${lot.id}`;
+  if (!outlineCache.has(key)) {
+    outlineCache.set(key, { totalSqFt: lot.sqFt, estimate: null, wanted: ['Snow Removal'], center: { lat: lot.lat, lng: lot.lng }, zones: [{ name: 'Parking Lot', color: '#38bdf8', sqFt: lot.sqFt, points: lot.ring }] });
+  }
+  return outlineCache.get(key);
+}
+
 function baseJob(lawn) {
   return {
     service: 'Lawn Cutting',
@@ -188,7 +225,7 @@ function baseJob(lawn) {
     earnings: lawn.price,
     repeatDays: 7,
     lawnId: lawn.id,
-    ...(lawn.quote ? { quote: lawn.quote, notes: lawn.notes, requested: lawn.requested } : {}),
+    ...(lawn.quote ? { quote: lawn.quote, notes: lawn.notes, requested: lawn.requested } : { quote: lawnOutline(lawn) }),
   };
 }
 
@@ -205,6 +242,7 @@ function lotJob(lot) {
     repeatDays: 0,
     perSnowfall: true,
     lotId: lot.id,
+    quote: lotOutline(lot),
   };
 }
 

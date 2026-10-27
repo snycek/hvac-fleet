@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { customerHistory, methodLabel } from '../lib/customers.js';
+import { customerHistory, methodLabel, nextReminderDate } from '../lib/customers.js';
 import { METHODS } from '../lib/payments.js';
 import { formatPrice, formatSqFt } from '../lib/zones.js';
 import { repeatLabel } from '../lib/dates.js';
@@ -65,7 +65,10 @@ export default function CustomerCard({ customerKey, jobs, payments, today, onClo
         </div>
 
         <div className="cust-actions">
-          {h.balance > 0 && onRemind && <button type="button" className="btn-ghost" disabled={busy} onClick={remind}>🔔 {busy ? 'Sending…' : 'Remind'}</button>}
+          {h.balance > 0 && onRemind && (() => {
+            const wait = nextReminderDate(h.contacts[0], today);
+            return <button type="button" className="btn-ghost" disabled={busy || !!wait} onClick={remind} title={wait ? 'One reminder per week' : 'Send one reminder for the whole balance'}>🔔 {busy ? 'Sending…' : wait ? `Next reminder ${new Date(`${wait}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Remind'}</button>;
+          })()}
           {h.balance > 0 && onPrint && <button type="button" className="btn-ghost" onClick={() => onPrint(h)}>🖨 Print invoice</button>}
           {note && <span className="cust-note">{note}</span>}
         </div>

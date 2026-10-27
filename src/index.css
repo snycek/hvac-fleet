@@ -712,3 +712,10 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .pay-history-empty { color: var(--text-muted); font-size: 13px; }
 .pay-stub-btn { padding: 2px 9px; font-size: 12px; }
 .stub-sheet { min-height: 0; }
+
+/* New quote arrived: the left panel glows for a moment */
+.panel-flash { position: absolute; inset: -2px; border-radius: inherit; border: 2px solid #3fb950; box-shadow: 0 0 0 4px #3fb95033, 0 0 24px #3fb95066; pointer-events: none; animation: panel-flash 2.4s ease-out forwards; z-index: 5; }
+@keyframes panel-flash { 0%, 40% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .panel-flash { animation-duration: 0.01s; } }
+
+.mark-all-btn { color: #3fb950 !important; border-color: #3fb95055 !important; }

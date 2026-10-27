@@ -4,7 +4,7 @@ import { receiptUrl } from '../hooks/useExpenses.js';
 import { MANUAL_EXPENSE_TYPES, PAST_DUE_DAYS, daysSinceCut, lawnKey, expenseType, isPastDue, money, reminderMessage, shortDate } from '../lib/lawns.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { METHODS, TEST_CARDS } from '../lib/payments.js';
-import { REMIND_GAP_DAYS, contactsFor, pastDueCustomers } from '../lib/customers.js';
+import { REMIND_GAP_DAYS, contactsFor, nextReminderDate, pastDueCustomers } from '../lib/customers.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
@@ -98,7 +98,6 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   // list and picks who "Remind all" goes to (All = the usual 30+ past-due rule).
   const [lateMin, setLateMin] = useState(0);
   const [customLate, setCustomLate] = useState('');
-  const [includeRecent, setIncludeRecent] = useState(false);
   const threshold = lateMin || PAST_DUE_DAYS;
   // Address / name search: narrows the list and who "Remind all" goes to.
   const [search, setSearch] = useState('');
@@ -127,11 +126,27 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
       };
     }).sort((a, b) => b.oldestDays - a.oldestDays);
   })();
+  // Testing helper: mark every bill in the (filtered) list paid by cash, one tap.
+  const [payingAll, setPayingAll] = useState('');
+  const markAllPaid = async () => {
+    const list = shownUnpaid;
+    const total = list.reduce((s, j) => s + (j.earnings || 0), 0);
+    if (!list.length || !window.confirm(`Mark all ${accounts.length} account${accounts.length === 1 ? '' : 's'} paid (${list.length} bills, ${money(total)}) as cash?`)) return;
+    setPayingAll(`Marking 0 of ${list.length} paid…`);
+    let n = 0;
+    for (const j of list) {
+      await markPaid(j.id, true, 'cash');
+      n += 1;
+      if (n % 5 === 0) setPayingAll(`Marking ${n} of ${list.length} paid…`);
+    }
+    setPayingAll(`✓ Marked ${n} bills paid (${money(total)})`);
+  };
   const remindOne = async acct => {
     setReminding(acct.key);
     try { await (remindAccounts ? remindAccounts([acct]) : remindCustomer(acct.latest.id, reminderMessage(acct.latest, COMPANY_INFO.name))); } finally { setReminding(null); }
   };
-  const toRemind = includeRecent ? behind : behind.filter(c => !c.recentlyReminded);
+  // One reminder per customer per week — anyone reminded in the last 7 days waits.
+  const toRemind = behind.filter(c => !c.recentlyReminded);
   const [bulk, setBulk] = useState({ open: false, busy: false, done: '' });
   const remindAll = async () => {
     setBulk(b => ({ ...b, busy: true }));
@@ -195,7 +210,10 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   <span style={{ fontWeight: 700, width: '60px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
                   <span className="row-actions">
                     <button type="button" className="btn-ghost remind-btn" disabled={paying === job.id} onClick={() => record(job, 'card', '4242')} title="Try the charge again">↻ Retry card</button>
-                    {remindCustomer && <button type="button" className="btn-ghost remind-btn" disabled={reminding === job.id} onClick={() => remind(job)}>🔔 Remind</button>}
+                    {remindCustomer && (() => {
+                      const wait = nextReminderDate(contactsFor(jobs.filter(j => lawnKey(j) === lawnKey(job)))[0], today);
+                      return <button type="button" className="btn-ghost remind-btn" disabled={!!wait || reminding === job.id} onClick={() => remind(job)} title={wait ? `One reminder per week. Next on ${shortDate(wait)}.` : 'Send a payment reminder'}>{wait ? `🔔 ${shortDate(wait)}` : '🔔 Remind'}</button>;
+                    })()}
                   </span>
                 </div>
               ))}
@@ -226,6 +244,11 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 onChange={e => { setSearch(e.target.value); setBulk({ open: false, busy: false, done: '' }); }} />
               {q && <button type="button" onClick={() => setSearch('')}>Clear</button>}
             </div>
+            <div className="remind-all">
+              <button type="button" className="btn-ghost remind-btn mark-all-btn" disabled={!shownUnpaid.length || /^Marking/.test(payingAll)} onClick={markAllPaid}
+                title="Mark every bill in this list paid (cash) — handy for testing">✓ Mark all paid ({accounts.length})</button>
+              {payingAll && <span className={/^✓/.test(payingAll) ? 'remind-done' : 'cust-dim'}>{payingAll}</span>}
+            </div>
             {remindAccounts && behind.length > 0 && (
               <div className="remind-all">
                 <button type="button" className="btn-ghost remind-btn" disabled={!toRemind.length || bulk.busy} onClick={() => setBulk({ open: !bulk.open, busy: false, done: '' })}
@@ -233,10 +256,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   🔔 Remind all {threshold}+ days ({toRemind.length})
                 </button>
                 {behind.some(c => c.recentlyReminded) && (
-                  <label className="cust-dim remind-include">
-                    <input type="checkbox" checked={includeRecent} onChange={e => setIncludeRecent(e.target.checked)} />
-                    Include {behind.filter(c => c.recentlyReminded).length} already reminded in the last {REMIND_GAP_DAYS} days
-                  </label>
+                  <span className="cust-dim">{behind.filter(c => c.recentlyReminded).length} already reminded this week — one reminder per week</span>
                 )}
                 {bulk.done && <span className="remind-done">{bulk.done}</span>}
                 {bulk.open && toRemind.length > 0 && (
@@ -281,10 +301,15 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(acct.latest)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${acct.name}`}>🖨</button>
                   )}
                   {(remindAccounts || remindCustomer) && (
-                    <button type="button" className="btn-ghost remind-btn" disabled={reminding === acct.key} onClick={() => remindOne(acct)}
-                      title={`Send ${String(acct.name).split(' ')[0]} one reminder for the whole balance`}>
-                      {reminding === acct.key ? '…' : '🔔 Remind'}
-                    </button>
+                    (() => {
+                      const wait = nextReminderDate(acct.lastReminder, today);
+                      return (
+                        <button type="button" className="btn-ghost remind-btn" disabled={!!wait || reminding === acct.key} onClick={() => remindOne(acct)}
+                          title={wait ? `Reminded ${shortDate(acct.lastReminder.at)} — one reminder per week. Next on ${shortDate(wait)}.` : `Send ${String(acct.name).split(' ')[0]} one reminder for the whole balance`}>
+                          {reminding === acct.key ? '…' : wait ? `🔔 ${shortDate(wait)}` : '🔔 Remind'}
+                        </button>
+                      );
+                    })()
                   )}
                   <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}
                     aria-expanded={choosing === acct.key} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}

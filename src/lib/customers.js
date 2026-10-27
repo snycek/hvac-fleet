@@ -98,6 +98,13 @@ export function customerHistory({ jobs, payments = [], key, today }) {
 
 export const methodLabel = r => (r.card ? r.card : (METHODS[r.method]?.label || r.method));
 
+/** One reminder per customer per week: the date they can next be reminded, or null if now. */
+export function nextReminderDate(lastReminder, today) {
+  if (!lastReminder?.at) return null;
+  const next = addDays(String(lastReminder.at).slice(0, 10), REMIND_GAP_DAYS);
+  return next > today ? next : null;
+}
+
 /** Customers 30+ days behind, one entry each, with their open cuts. */
 export function pastDueCustomers(jobs, today, minDays = PAST_DUE_DAYS) {
   const byKey = new Map();

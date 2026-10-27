@@ -1,7 +1,13 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import QuoteInbox from './QuoteInbox.jsx';
 import { receiptUrl } from '../hooks/useExpenses.js';
-import { EXPENSE_TYPES, expenseType, money, shortDate } from '../lib/lawns.js';
+import { MANUAL_EXPENSE_TYPES, PAST_DUE_DAYS, daysSinceCut, expenseType, isPastDue, money, reminderMessage, shortDate } from '../lib/lawns.js';
+import { COMPANY_INFO } from '../data/services.js';
+import { METHODS, TEST_CARDS } from '../lib/payments.js';
+
+// Approving cards first, then the ones that decline.
+const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
+import { todayString } from '../lib/dates.js';
 
 const sectionTitle = { fontSize: '14px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' };
 
@@ -29,7 +35,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
           <b style={{ color: 'var(--text-primary)' }}>{foreman?.name || 'Foreman'}</b> · {shortDate(exp.date)}{exp.note ? ` · ${exp.note}` : ''}
         </div>
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {EXPENSE_TYPES.map(t => (
+          {MANUAL_EXPENSE_TYPES.map(t => (
             <button key={t.id} type="button" onClick={() => setCategory(t.id)} aria-pressed={category === t.id} style={{
               padding: '5px 10px', borderRadius: '14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
               border: `1px solid ${category === t.id ? 'var(--accent-teal)' : 'var(--border)'}`,
@@ -61,19 +67,36 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 }
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
-export default function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense }) {
+// bare: no title row (the hub panel shows its own) and tighter spacing.
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, today = todayString(), bare = false }) {
   const [paying, setPaying] = useState(null);
+  const [showAllUnpaid, setShowAllUnpaid] = useState(false);
+  const UNPAID_PREVIEW = 5;
   const quotes = jobs.filter(j => j.status === 'quote');
   const toLog = expenses.filter(e => e.status === 'pending');
+  // Oldest first, so anything 30+ days past due is at the top.
   const unpaid = jobs.filter(j => j.status === 'completed' && !j.paid).sort((a, b) => String(a.completedAt).localeCompare(String(b.completedAt)));
+  const pastDue = unpaid.filter(j => isPastDue(j, today));
+  // Card payments that came back declined.
+  const problems = unpaid.filter(j => j.paymentIssue);
+  const [choosing, setChoosing] = useState(null); // job id whose "Mark paid" menu is open
+  const [testCard, setTestCard] = useState('4242');
+  const record = async (job, method, last4) => {
+    setPaying(job.id);
+    try { await markPaid(job.id, true, method, last4); } finally { setPaying(null); setChoosing(null); }
+  };
+  const [reminding, setReminding] = useState(null);
+  const remind = async (job) => {
+    setReminding(job.id);
+    try { await remindCustomer(job.id, reminderMessage(job, COMPANY_INFO.name)); } finally { setReminding(null); }
+  };
   const unpaidTotal = unpaid.reduce((s, j) => s + (j.earnings || 0), 0);
   const total = quotes.length + toLog.length + unpaid.length;
 
-  const pay = async (id) => { setPaying(id); try { await markPaid(id, true); } finally { setPaying(null); } };
 
   return (
-    <section style={{ marginBottom: '28px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
+    <section style={{ marginBottom: bare ? 0 : '28px' }}>
+      {!bare && <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' }}>
         <h2 style={{ fontSize: '20px', fontWeight: 700 }}>📥 To-Do</h2>
         <span style={{ background: total ? '#f0b42922' : 'var(--bg-elevated)', color: total ? '#f0b429' : 'var(--text-muted)', border: `1px solid ${total ? '#f0b42955' : 'var(--border)'}`, borderRadius: '12px', padding: '2px 10px', fontSize: '12px', fontWeight: 700 }}>
           {total}
@@ -81,9 +104,9 @@ export default function OwnerTodo({ jobs, technicians, expenses, scheduleJob, de
         {quotes.length > 0 && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>📝 {quotes.length}</span>}
         {toLog.length > 0 && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>🧾 {toLog.length}</span>}
         {unpaid.length > 0 && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>💵 {money(unpaidTotal)}</span>}
-      </div>
+      </div>}
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: bare ? '14px' : '22px' }}>
         <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} />
 
         {toLog.length > 0 && (
@@ -97,21 +120,88 @@ export default function OwnerTodo({ jobs, technicians, expenses, scheduleJob, de
           </div>
         )}
 
-        {unpaid.length > 0 && (
+        {problems.length > 0 && (
           <div>
-            <h3 style={sectionTitle}>Unpaid · {unpaid.length} · {money(unpaidTotal)}</h3>
+            <h3 style={{ ...sectionTitle, color: '#ff7b72' }}>Payment problems · {problems.length}</h3>
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              {unpaid.map((job, i) => (
-                <div key={job.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 600, flex: '1 1 140px', minWidth: 0 }}>{job.clientName}</span>
-                  <span style={{ color: 'var(--text-muted)', width: '70px' }}>✂️ {shortDate(job.completedAt)}</span>
-                  <span style={{ fontWeight: 700, width: '70px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
-                  <button type="button" className="btn-primary" disabled={paying === job.id} onClick={() => pay(job.id)} style={{ padding: '6px 14px', fontSize: '12px' }}>
-                    {paying === job.id ? '…' : '💵 Mark Paid'}
-                  </button>
+              {problems.map((job, i) => (
+                <div key={job.id} className="unpaid-row problem" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
+                  <span style={{ flex: '1 1 170px', minWidth: 0 }}>
+                    <span aria-hidden="true">❌ </span>
+                    <span style={{ fontWeight: 600 }}>{String(job.address || '').split(',')[0]}</span>
+                    <span style={{ color: 'var(--text-muted)' }}> · {job.clientName}</span>
+                    <div style={{ fontSize: '12px', color: '#ff7b72' }}>
+                      {job.paymentIssue.brand || 'Card'} ••{job.paymentIssue.last4 || '----'} · {job.paymentIssue.reason} · {shortDate(job.paymentIssue.at)}
+                    </div>
+                  </span>
+                  <span style={{ fontWeight: 700, width: '60px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
+                  <span className="row-actions">
+                    <button type="button" className="btn-ghost remind-btn" disabled={paying === job.id} onClick={() => record(job, 'card', '4242')} title="Try the charge again">↻ Retry card</button>
+                    {remindCustomer && <button type="button" className="btn-ghost remind-btn" disabled={reminding === job.id} onClick={() => remind(job)}>🔔 Remind</button>}
+                  </span>
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {unpaid.length > 0 && (
+          <div>
+            <h3 style={sectionTitle}>
+              Unpaid · {unpaid.length} · {money(unpaidTotal)}
+              {pastDue.length > 0 && <span className="past-due-count" title={`${pastDue.length} cut${pastDue.length === 1 ? '' : 's'} unpaid ${PAST_DUE_DAYS}+ days`}> · ⚠️ {pastDue.length} past {PAST_DUE_DAYS} days</span>}
+            </h3>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              {(showAllUnpaid ? unpaid : unpaid.slice(0, UNPAID_PREVIEW)).map((job, i) => {
+                const days = daysSinceCut(job, today);
+                const late = days >= PAST_DUE_DAYS;
+                const lastReminder = job.reminders?.[job.reminders.length - 1];
+                return (
+                <div key={job.id} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
+                  <span style={{ flex: '1 1 170px', minWidth: 0 }}>
+                    {late && <span className="yield" role="img" aria-label={`${days} days past due`} title={`${days} days past due`}>⚠️</span>}
+                    <span style={{ fontWeight: 600 }}>{String(job.address || '').split(',')[0]}</span>
+                    <span style={{ color: 'var(--text-muted)' }}> · {job.clientName}</span>
+                    {lastReminder && (
+                      <span className="reminded" title={lastReminder.message}> · 🔔 {shortDate(lastReminder.at)}{job.reminders.length > 1 ? ` ×${job.reminders.length}` : ''}</span>
+                    )}
+                  </span>
+                  <span style={{ color: late ? '#f0b429' : 'var(--text-muted)', width: '84px', whiteSpace: 'nowrap', fontWeight: late ? 700 : 400 }} title={`Cut ${shortDate(job.completedAt)}`}>✂️ {shortDate(job.completedAt)} · {days}d</span>
+                  <span style={{ fontWeight: 700, width: '70px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
+                  <span className="row-actions">
+                  {remindCustomer && (
+                    <button type="button" className="btn-ghost remind-btn" disabled={reminding === job.id} onClick={() => remind(job)}
+                      title={`Send ${job.clientName.split(' ')[0]} a payment reminder`}>
+                      {reminding === job.id ? '…' : '🔔 Remind'}
+                    </button>
+                  )}
+                  <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === job.id} onClick={() => setChoosing(choosing === job.id ? null : job.id)}
+                    aria-expanded={choosing === job.id} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}>
+                    {paying === job.id ? '…' : bare ? 'Mark paid' : '💵 Mark Paid'}
+                  </button>
+                  </span>
+                  {choosing === job.id && (
+                    <div className="pay-choose">
+                      <span>Paid by</span>
+                      <button type="button" onClick={() => record(job, 'cash')}>{METHODS.cash.icon} Cash</button>
+                      <button type="button" onClick={() => record(job, 'check')}>{METHODS.check.icon} Check</button>
+                      <span className="pay-choose-card">
+                        <select value={testCard} onChange={e => setTestCard(e.target.value)} aria-label="Test card" title="Test card processor — pick a card that approves or declines">
+                          {TEST_CARD_ORDER.map(l4 => [l4, TEST_CARDS[l4]]).map(([l4, c]) => <option key={l4} value={l4}>{c.brand} ••{l4}{c.ok ? '' : ` (${c.reason.toLowerCase()})`}</option>)}
+                        </select>
+                        <button type="button" onClick={() => record(job, 'card', testCard)}>{METHODS.card.icon} Charge card</button>
+                      </span>
+                    </div>
+                  )}
+                </div>
+                );
+              })}
+            </div>
+            {unpaid.length > UNPAID_PREVIEW && (
+              <button type="button" className="btn-ghost" onClick={() => setShowAllUnpaid(s => !s)} style={{ marginTop: '8px', padding: '6px 12px', fontSize: '12px' }}>
+                {showAllUnpaid ? 'Show less' : `Show ${unpaid.length - UNPAID_PREVIEW} more`}
+              </button>
+            )}
           </div>
         )}
 
@@ -124,3 +214,5 @@ export default function OwnerTodo({ jobs, technicians, expenses, scheduleJob, de
     </section>
   );
 }
+
+export default memo(OwnerTodo);

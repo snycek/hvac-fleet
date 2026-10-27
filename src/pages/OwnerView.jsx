@@ -1,239 +1,331 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useJobs } from '../hooks/useJobs.js';
 import { useTechnicians } from '../hooks/useTechnicians.js';
-import StatusBadge from '../components/StatusBadge.jsx';
-import { JOB_STATUS, TECH_STATUS } from '../lib/constants.js';
+import { useExpenses } from '../hooks/useExpenses.js';
+import { useDelays } from '../hooks/useDelays.js';
+import { useShifts } from '../hooks/useShifts.js';
+import { usePayments } from '../hooks/usePayments.js';
+import { laborExpenses } from '../lib/payroll.js';
+import { SPEEDS, useDemoSim } from '../hooks/useDemoSim.js';
 import FleetMap from '../components/FleetMap.jsx';
 import OwnerTodo from '../components/OwnerTodo.jsx';
 import ProfitLoss from '../components/ProfitLoss.jsx';
 import LawnsPanel from '../components/LawnsPanel.jsx';
-import { useExpenses } from '../hooks/useExpenses.js';
-import { money, profitAndLoss } from '../lib/lawns.js';
-import { todayString } from '../lib/dates.js';
-import { relativeDay, repeatLabel } from '../lib/dates.js';
+import CrewReport from '../components/CrewReport.jsx';
+import TruckRoutes from '../components/TruckRoutes.jsx';
+import ActivityFeed from '../components/ActivityFeed.jsx';
+import CollapseButton from '../components/CollapseButton.jsx';
+import PayrollView from '../components/PayrollView.jsx';
+import { usePayroll } from '../hooks/usePayroll.js';
+import { formatDay, todayString } from '../lib/dates.js';
+import { hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
 
-function EarningsCard({ tech, jobs }) {
-  const today = new Date().toISOString().split('T')[0];
-  const techJobs = jobs.filter(j => j.assignedTo === tech.id);
-  const completed = techJobs.filter(j => j.status === 'completed');
-  const completedToday = completed.filter(j => (j.completedAt || j.createdAt || '').startsWith(today));
-  const earnings  = completed.reduce((sum, j) => sum + (j.earnings || 0), 0);
-  const earningsToday = completedToday.reduce((sum, j) => sum + (j.earnings || 0), 0);
-  const st = TECH_STATUS[tech.status] || { label: tech.status, color: '#8b949e' };
-  const initials = tech.name.split(' ').map(n => n[0]).join('');
+// Stable no-op so memoized panels don't re-render in demo mode.
+const noop = async () => {};
 
+const LEGEND = [['#3fb950', 'Available'], ['#9c55f7', 'En Route'], ['#e67e22', 'Cutting'], ['#58a6ff', 'Rain'], ['#8b949e', 'Offline']];
+
+// One number in the top strip; flashes when it changes (money coming in).
+function Kpi({ label, value, color = 'var(--text-primary)' }) {
+  const [flash, setFlash] = useState(0);
+  const prev = useRef(value);
+  useEffect(() => {
+    if (prev.current === value) return undefined;
+    prev.current = value;
+    const id = setTimeout(() => setFlash(f => f + 1), 0);
+    return () => clearTimeout(id);
+  }, [value]);
   return (
-    <div className="card" style={{ minWidth: '220px', padding: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-        <div style={{
-          width: '44px', height: '44px', borderRadius: '50%',
-          background: st.color + '22', border: `2px solid ${st.color}55`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontWeight: 700, fontSize: '16px', color: st.color, flexShrink: 0,
-        }}>
-          {initials}
-        </div>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: '14px' }}>{tech.name}</div>
-          <StatusBadge label={st.label} color={st.color} />
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-        {[
-          { label: 'Today Earned', value: `$${earningsToday.toFixed(0)}`, color: '#3fb950' },
-          { label: 'Cuts Today',   value: completedToday.length,           color: '#1f6feb' },
-          { label: 'Scheduled', value: techJobs.filter(j => j.status !== 'completed' && j.assignedTo === tech.id).length, color: '#e67e22' },
-          { label: 'Total Earned', value: `$${earnings.toFixed(0)}`,      color: '#0fd3c3' },
-        ].map(stat => (
-          <div key={stat.label} style={{
-            background: 'var(--bg-primary)',
-            borderRadius: '8px',
-            padding: '10px 12px',
-            textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '18px', fontWeight: 700, color: stat.color }}>{stat.value}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{stat.label}</div>
-          </div>
-        ))}
-      </div>
+    <div className="dash-kpi">
+      <div key={flash} className={`dash-kpi-value${flash ? ' pl-flash' : ''}`} style={{ color }}>{value}</div>
+      <div className="dash-kpi-label">{label}</div>
     </div>
   );
 }
 
+const Legend = () => (
+  <div style={{ display: 'flex', gap: '10px', fontSize: '11px', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+    {LEGEND.map(([color, label]) => (
+      <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />{label}
+      </span>
+    ))}
+  </div>
+);
+
+// Which hub panels are folded; remembered per browser.
+const COLLAPSE_KEY = 'ownerHubCollapsed';
+const loadCollapsed = () => { try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch { return {}; } };
+// Columns and their panels, with each column's normal width (fr so the others fill freed space).
+const COLUMNS = [
+  { panels: ['todo'], track: 'minmax(270px, 19fr)' },
+  { panels: ['routes', 'activity'], track: 'minmax(0, 34fr)' },
+  { panels: ['map'], track: 'minmax(250px, 22fr)' },
+  { panels: ['pl', 'crew'], track: 'minmax(340px, 25fr)' },
+];
+
+/** Owner hub: everything on one screen. Long lists scroll inside their own panel. */
 export default function OwnerView() {
-  const { jobs: allJobs, scheduleJob, declineJob, markPaid } = useJobs();
-  const { expenses, addExpense, logExpense, rejectExpense } = useExpenses();
+  const live = useJobs();
+  const liveExpenses = useExpenses();
+  const { technicians: liveTechs } = useTechnicians();
+  const liveDelays = useDelays();
+  const { shifts: liveShifts } = useShifts();
+  const livePayments = usePayments();
+  const sim = useDemoSim();
+  const [demoOn, setDemoOn] = useState(false);
+  const [leftTab, setLeftTab] = useState('todo');
+  const [view, setView] = useState('hub'); // 'hub' | 'payroll'
+  const [selectedTechId, setSelectedTechId] = useState(null);
+  const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const toggle = id => setCollapsed(c => {
+    const next = { ...c, [id]: !c[id] };
+    try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+  });
+  const fold = id => (collapsed[id] ? ' collapsed' : '');
+  // A column whose panels are all folded becomes a thin rail; the rest share its space.
+  const gridVars = Object.fromEntries(COLUMNS.map((c, i) => [`--col${i + 1}`, c.panels.every(p => collapsed[p]) ? '190px' : c.track]));
+
+  // Demo mode swaps in the 48101 simulation; everything below reads from here.
+  const allJobs       = demoOn ? sim.jobs : live.jobs;
+  const technicians   = demoOn ? sim.technicians : liveTechs;
+  const expenses      = demoOn ? sim.expenses : liveExpenses.expenses;
+  const markPaid      = demoOn ? sim.markPaid : live.markPaid;
+  const remindCustomer = demoOn ? sim.remindCustomer : live.remindCustomer;
+  const scheduleJob   = demoOn ? noop : live.scheduleJob;
+  const declineJob    = demoOn ? noop : live.declineJob;
+  const addExpense    = demoOn ? noop : liveExpenses.addExpense;
+  const logExpense    = demoOn ? noop : liveExpenses.logExpense;
+  const rejectExpense = demoOn ? noop : liveExpenses.rejectExpense;
+  const delays        = demoOn ? sim.delays : liveDelays;
+  const payroll       = usePayroll({ demo: demoOn, foremen: demoOn ? sim.technicians : [] });
+  const shifts        = demoOn ? sim.shifts : liveShifts; // rolled out → back at yard
+  const payments      = demoOn ? sim.payments : livePayments;
+
   // Quotes live in To-Do until accepted; declined ones are hidden.
   const jobs = useMemo(() => allJobs.filter(j => !['quote', 'declined'].includes(j.status)), [allJobs]);
-  const { technicians }  = useTechnicians();
-  const [selectedTechId, setSelectedTechId] = useState(null);
+  // The demo runs on its own calendar; reports treat the demo's date as "today".
+  const today = demoOn ? sim.date : todayString();
+  // P/L expenses = logged expenses + each crew's labor (from payroll hours × rates).
+  const labor = useMemo(() => laborExpenses({ employees: payroll.employees, jobs, shifts, delays, settings: payroll.settings, today }),
+    [payroll.employees, payroll.settings, jobs, shifts, delays, today]);
+  const books = useMemo(() => [...expenses, ...labor], [expenses, labor]);
+  // Moving positions stay apart from status so the panels don't redraw 10×/second.
+  const mapTechs = useMemo(
+    // Demo: trucks that are off today (mowers in winter, plows when it's not snowing) stay off the map.
+    () => (demoOn ? technicians.map((t, i) => ({ ...t, location: sim.positions[i] })).filter(t => t.status !== 'offline') : technicians),
+    [demoOn, technicians, sim.positions],
+  );
 
-  const thisMonth       = profitAndLoss(jobs, expenses, todayString().slice(0, 7));
-  const owedTotal       = jobs.filter(j => j.status === 'completed' && !j.paid).reduce((s, j) => s + (j.earnings || 0), 0);
-  const completedJobs   = jobs.filter(j => j.status === 'completed').length;
-  const activeTechs     = technicians.filter(t => ['available', 'busy', 'en_route'].includes(t.status)).length;
-  const fleetTechs      = technicians.filter(t => t.status !== 'pending_approval');
+  const toggleDemo = () => {
+    if (demoOn) sim.pause();
+    setSelectedTechId(null);
+    setDemoOn(on => !on);
+  };
 
-  useEffect(() => {
-    if (!selectedTechId) return;
-    const stillExists = fleetTechs.some(t => t.id === selectedTechId);
-    if (!stillExists) {
-      setSelectedTechId(null);
-    }
-  }, [fleetTechs, selectedTechId]);
+  // ---- Numbers for the top strip ----
+  const stats = useMemo(() => {
+    const month = profitAndLoss(jobs, books, today.slice(0, 7));
+    const todays = jobs.filter(j => jobDay(j, today) === today);
+    const done = todays.filter(j => j.status === 'completed');
+    const crew = technicians.filter(t => t.status !== 'pending_approval');
+    return {
+      month,
+      cutToday: done.length,
+      totalToday: todays.length,
+      leftToday: todays.length - done.length,
+      billedToday: done.reduce((s, j) => s + (j.earnings || 0), 0),
+      onDuty: crew.filter(t => ['available', 'busy', 'en_route'].includes(t.status)).length,
+      crewSize: crew.length,
+      lawns: new Set(jobs.map(lawnKey)).size,
+      rainMonth: (() => { const r = periodRange('month', today); return rainMinutes(delays, null, r.from, r.to); })(),
+      onRain: crew.filter(t => t.status === 'rain_delay').length,
+    };
+  }, [jobs, books, today, technicians, delays]);
+
+  const todoCount = useMemo(() => (
+    allJobs.filter(j => j.status === 'quote').length
+    + expenses.filter(e => e.status === 'pending').length
+    + jobs.filter(j => j.status === 'completed' && !j.paid).length
+  ), [allJobs, expenses, jobs]);
+
+  const kpiGroups = [
+    { title: 'Today', tiles: [
+      { label: 'Cut', value: `${stats.cutToday}/${stats.totalToday}` },
+      { label: 'Left', value: stats.leftToday },
+      { label: 'Billed', value: money(stats.billedToday), color: '#3fb950' },
+    ] },
+    { title: 'This month', tiles: [
+      { label: 'Income', value: money(stats.month.incomeTotal), color: '#3fb950' },
+      { label: 'Owed', value: money(stats.month.owedTotal), color: '#f0b429' },
+      { label: 'Expenses', value: money(stats.month.expenseTotal) },
+      { label: 'Net', value: money(stats.month.net), color: stats.month.net >= 0 ? '#3fb950' : '#ff7b72' },
+    ] },
+    { title: 'Crew', tiles: [
+      { label: 'On duty', value: `${stats.onDuty}/${stats.crewSize}` },
+      { label: 'Rain · month', value: stats.rainMonth ? hoursMins(stats.rainMonth) : '0m', color: stats.rainMonth ? '#58a6ff' : undefined },
+    ] },
+  ];
+
+  const seg = { display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', height: '30px' };
+  const segBtn = on => ({
+    padding: '0 10px', height: '100%', fontSize: '12px', fontWeight: 700, border: 'none', cursor: 'pointer',
+    background: on ? 'var(--accent-teal)22' : 'transparent', color: on ? 'var(--accent-teal)' : 'var(--text-muted)',
+  });
 
   return (
-    <div style={{ maxWidth: '1300px', margin: '0 auto', padding: '24px 16px' }}>
-      <div style={{ marginBottom: '28px' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: 700, marginBottom: '6px' }}>Owner Dashboard</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>New quotes, live crew map, and earnings</p>
-      </div>
-
-      <OwnerTodo
-        jobs={allJobs} technicians={technicians} expenses={expenses}
-        scheduleJob={scheduleJob} declineJob={declineJob} markPaid={markPaid}
-        logExpense={logExpense} rejectExpense={rejectExpense}
-      />
-
-      {/* KPI Strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '28px' }}>
-        {[
-          { label: 'Net This Month',   value: money(thisMonth.net),                                                      color: thisMonth.net >= 0 ? '#3fb950' : '#ff7b72' },
-          { label: 'Owed',             value: money(owedTotal),                                                          color: '#f0b429' },
-          { label: 'Cuts Done',        value: completedJobs,                                                             color: '#0fd3c3' },
-          { label: 'Foremen On Duty',    value: `${activeTechs} / ${technicians.length}`,                                  color: '#e67e22' },
-        ].map(s => (
-          <div key={s.label} className="card" style={{ textAlign: 'center', padding: '20px' }}>
-            <div style={{ fontSize: '26px', fontWeight: 800, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Fleet Map */}
-      <div className="card" style={{ padding: '0', overflow: 'hidden', marginBottom: '28px' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <span style={{ fontWeight: 700, fontSize: '16px' }}>🗺️ Live Crew Map</span>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '10px' }}>Downriver Michigan</span>
-          </div>
-          <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-muted)' }}>
-            {[['#3fb950', 'Available'], ['#e67e22', 'On Job'], ['#9c55f7', 'En Route'], ['#8b949e', 'Offline']].map(([color, label]) => (
-              <span key={label} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: color, display: 'inline-block' }} />
-                {label}
-              </span>
-            ))}
+    <div className="owner-dash">
+      {/* Title + grouped numbers */}
+      <div className="dash-head">
+        <div className="dash-title">
+          <div style={{ fontWeight: 800, fontSize: '18px', letterSpacing: '-0.2px' }}>Owner Hub</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{formatDay(today)} · {stats.lawns} lawns</div>
+          <div className="hub-tabs" role="tablist" style={{ marginTop: '6px' }}>
+            <button type="button" role="tab" aria-selected={view === 'hub'} onClick={() => setView('hub')}>📊 Hub</button>
+            <button type="button" role="tab" aria-selected={view === 'payroll'} onClick={() => setView('payroll')}>👷 Crew & Payroll</button>
           </div>
         </div>
-        <div className="crew-map-grid">
-          <aside style={{ borderRight: '1px solid var(--border)', background: 'var(--bg-elevated)', padding: '14px', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Crew List</div>
-              {selectedTechId && (
-                <button className="btn-ghost" onClick={() => setSelectedTechId(null)} style={{ fontSize: '11px', padding: '4px 10px' }}>
-                  Clear
-                </button>
-              )}
+        <div className="dash-kpis">
+          {kpiGroups.map(g => (
+            <div key={g.title} className="kpi-group" style={{ flexGrow: g.tiles.length }}>
+              <div className="kpi-group-title">{g.title}</div>
+              <div className="kpi-row" style={{ gridTemplateColumns: `repeat(${g.tiles.length}, minmax(0, 1fr))` }}>
+                {g.tiles.map(k => <Kpi key={k.label} {...k} />)}
+              </div>
             </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {fleetTechs.map(tech => {
-                const st = TECH_STATUS[tech.status] || { label: tech.status, color: '#8b949e' };
-                const isSelected = selectedTechId === tech.id;
-                const activeJob = jobs.find(j => j.assignedTo === tech.id && ['assigned', 'en_route', 'in_progress'].includes(j.status));
-
-                return (
-                  <button
-                    key={tech.id}
-                    type="button"
-                    onClick={() => setSelectedTechId(tech.id)}
-                    style={{
-                      width: '100%', textAlign: 'left',
-                      border: `1px solid ${isSelected ? st.color : 'var(--border)'}`,
-                      background: isSelected ? `${st.color}22` : 'var(--bg-primary)',
-                      borderRadius: '10px', padding: '10px 12px', cursor: 'pointer',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{tech.name}</div>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: st.color, display: 'inline-block' }} />
-                    </div>
-                    <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {tech.truckName || 'Truck not set'}
-                    </div>
-                    <div style={{ marginTop: '2px', fontSize: '11px', color: st.color, fontWeight: 600 }}>
-                      {st.label}
-                    </div>
-                    {activeJob && (
-                      <div style={{ marginTop: '5px', fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {activeJob.service}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
-
-          <div style={{ minHeight: '440px' }}>
-            <FleetMap technicians={technicians} jobs={jobs} selectedTechId={selectedTechId} />
-          </div>
-        </div>
-      </div>
-
-      <ProfitLoss jobs={jobs} expenses={expenses} technicians={technicians} addExpense={addExpense} />
-
-      <LawnsPanel jobs={jobs} markPaid={markPaid} />
-
-      {/* Foreman Report Cards */}
-      <div>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '18px' }}>Foreman Report Cards</h2>
-        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
-          {technicians.map(tech => (
-            <EarningsCard key={tech.id} tech={tech} jobs={jobs} />
           ))}
         </div>
+        <button type="button" className="btn-ghost" onClick={toggleDemo} aria-pressed={demoOn}
+          style={{ padding: '7px 13px', fontSize: '13px', ...(demoOn ? { color: '#f0b429', borderColor: '#f0b42977', background: '#f0b42914' } : {}) }}>
+          🎬 {demoOn ? 'Demo on' : 'Demo'}
+        </button>
       </div>
 
-      {/* Recent Jobs Table */}
-      <div style={{ marginTop: '36px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '18px' }}>Recent & Upcoming Cuts</h2>
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
-                {['Cut Day', 'Service', 'Customer', 'Foreman', 'Status', 'Price'].map(h => (
-                  <th key={h} style={{ padding: '12px 16px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600 }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {jobs.slice(0, 10).map((job, i) => {
-                const tech = technicians.find(t => t.id === job.assignedTo);
-                return (
-                  <tr key={job.id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-elevated)44' }}>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                      {job.status === 'completed' ? (job.completedAt || '').slice(0, 10) : relativeDay(job.scheduledDate)}
-                      {job.repeatDays > 0 && <div style={{ fontSize: '11px' }}>{repeatLabel(job.repeatDays)}</div>}
-                    </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-primary)' }}>{job.service}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{job.clientName}</td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{tech?.name || '—'}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <StatusBadge label={JOB_STATUS[job.status]?.label || job.status.replace('_', ' ')} color={JOB_STATUS[job.status]?.color || '#8b949e'} />
-                    </td>
-                    <td style={{ padding: '12px 16px', color: '#3fb950', fontWeight: 600 }}>
-                      ${job.earnings?.toFixed(2)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      {/* Demo controls */}
+      {demoOn && (
+        <div className="demo-bar">
+          <button type="button" onClick={sim.playing ? sim.pause : sim.play} aria-label={sim.playing ? 'Pause demo' : 'Play demo'}
+            className="demo-play" style={{ background: sim.playing ? '#e67e22' : '#3fb950' }}>
+            {sim.playing ? '⏸' : '▶'}
+          </button>
+          <div style={{ lineHeight: 1.25 }}>
+            <div style={{ fontWeight: 700, fontSize: '13px' }}>{formatDay(sim.date)} · Week {sim.week}</div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Demo · ZIP 48101 · {sim.playing ? 'running' : 'paused'}{sim.cleared ? ' · fresh books' : ''}</div>
+          </div>
+          <span className="demo-sep" />
+          <div style={seg} role="group" aria-label="Trucks">
+            <button type="button" aria-label="Fewer trucks" disabled={sim.truckCount <= 1} onClick={() => sim.setTruckCount(sim.truckCount - 1)} style={{ ...segBtn(false), opacity: sim.truckCount <= 1 ? 0.35 : 1 }}>−</button>
+            <span style={{ fontSize: '12px', fontWeight: 700, padding: '0 6px', whiteSpace: 'nowrap' }} title="Trucks running (16 lawns each per day)">🚜 {sim.truckCount} truck{sim.truckCount === 1 ? '' : 's'}</span>
+            <button type="button" aria-label="More trucks" disabled={sim.truckCount >= sim.maxTrucks} onClick={() => sim.setTruckCount(sim.truckCount + 1)} style={{ ...segBtn(false), opacity: sim.truckCount >= sim.maxTrucks ? 0.35 : 1 }}>+</button>
+          </div>
+          <div style={seg} role="group" aria-label="Demo speed">
+            {SPEEDS.map(s => <button key={s} type="button" aria-pressed={sim.speed === s} onClick={() => sim.setSpeed(s)} style={segBtn(sim.speed === s)}>{s}×</button>)}
+          </div>
+          <span style={{ fontSize: '12px', fontWeight: 600, color: '#58a6ff', whiteSpace: 'nowrap' }} title={sim.winter ? 'Demo winter (Dec–Mar): mowers parked; it snows about 1 workday in 3 and the plows roll at 4 AM.' : 'Demo weather: showers every 5th workday. Each foreman decides when to put their own truck on Rain Delay.'}>
+            {sim.winter
+              ? (sim.snowDay ? '❄️ Snow today · plows out' : '☁️ No snow · plows parked')
+              : sim.rainDay ? '🌧 Showers likely today' : `☀️ Dry · showers in ${sim.daysUntilRain} day${sim.daysUntilRain === 1 ? '' : 's'}`}
+          </span>
+          <button type="button" className="btn-ghost demo-action" onClick={sim.winter ? sim.jumpToSpring : sim.jumpToWinter}
+            title={sim.winter ? 'Back to mowing season' : 'Jump the demo to December: mowers park, plow trucks work snow days'}>
+            {sim.winter ? '🌱 Mowing season' : '❄️ Jump to winter'}
+          </button>
+          <span style={{ flex: 1 }} />
+          {sim.lastEvent && (
+            <span key={sim.lastEvent + sim.cutToday} className="pl-flash demo-event">{sim.lastEvent}</span>
+          )}
+          <span className="demo-sep" />
+          <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
+          <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
+          <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>
+        </div>
+      )}
+
+      {view === 'payroll' ? (
+        <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
+      ) : (
+      <div className="dash-main" style={gridVars}>
+        {/* 1. To-Do / Lawns */}
+        <div className="dash-col">
+          <section className={`dash-panel${fold('todo')}`}>
+            <div className="dash-panel-head">
+              <CollapseButton collapsed={collapsed.todo} onToggle={() => toggle('todo')} label="To-Do" />
+              <div className="dash-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={leftTab === 'todo'} onClick={() => setLeftTab('todo')}>📥 To-Do{todoCount ? <span className="tab-count">{todoCount}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'lawns'} onClick={() => setLeftTab('lawns')}>🌱 Lawns<span className="tab-count muted">{stats.lawns}</span></button>
+              </div>
+            </div>
+            {!collapsed.todo && <div className="dash-panel-body">
+              {leftTab === 'todo' ? (
+                <OwnerTodo
+                  bare
+                  jobs={allJobs} technicians={technicians} expenses={expenses}
+                  scheduleJob={scheduleJob} declineJob={declineJob} markPaid={markPaid}
+                  logExpense={logExpense} rejectExpense={rejectExpense}
+                  remindCustomer={remindCustomer} today={today}
+                />
+              ) : (
+                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} />
+              )}
+            </div>}
+          </section>
+        </div>
+
+        {/* 2. Routes per truck + what's happening */}
+        <div className="dash-col">
+          <section className={`dash-panel dash-routes${fold('routes')}`}>
+            <div className="dash-panel-head">
+              <CollapseButton collapsed={collapsed.routes} onToggle={() => toggle('routes')} label="Routes" />
+              <span className="dash-panel-title">🚜 Routes today</span>
+              <span className="dash-head-note">{stats.cutToday}/{stats.totalToday} cut · {stats.leftToday} left · {money(stats.billedToday)}</span>
+            </div>
+            {!collapsed.routes && <div className="dash-panel-body">
+              <TruckRoutes jobs={jobs} technicians={demoOn ? technicians.filter(t => t.status !== 'offline') : technicians} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} />
+            </div>}
+          </section>
+          <section className={`dash-panel${fold('activity')}`}>
+            <div className="dash-panel-head">
+              <CollapseButton collapsed={collapsed.activity} onToggle={() => toggle('activity')} label="Live activity" />
+              <span className="dash-panel-title">⚡ Live activity</span>
+              <span className="dash-head-note">today</span>
+            </div>
+            {!collapsed.activity && <div className="dash-panel-body">
+              <ActivityFeed jobs={jobs} expenses={expenses} technicians={technicians} delays={delays} shifts={shifts} payments={payments} today={today} />
+            </div>}
+          </section>
+        </div>
+
+        {/* 3. Tall map (48101 is tall and narrow) */}
+        <div className="dash-col">
+          <section className={`dash-panel${fold('map')}`}>
+            <div className="dash-panel-head">
+              <CollapseButton collapsed={collapsed.map} onToggle={() => toggle('map')} label="Live map" />
+              <span className="dash-panel-title">🗺️ Live map <span className="dash-head-note">{demoOn ? 'ZIP 48101' : 'Downriver'}</span></span>
+              {stats.onRain > 0 && <span style={{ fontSize: '12px', fontWeight: 700, color: '#58a6ff' }}>🌧 {stats.onRain} on rain delay</span>}
+            </div>
+            {!collapsed.map && <><div className="dash-map">
+              <div>
+                <FleetMap
+                  key={demoOn ? 'demo' : 'live'}
+                  technicians={mapTechs}
+                  jobs={jobs}
+                  selectedTechId={selectedTechId}
+                  {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
+                />
+              </div>
+            </div>
+            <div className="dash-panel-foot"><Legend /></div></>}
+          </section>
+        </div>
+
+        {/* 4. Money + who cut what */}
+        <div className="dash-col">
+          <ProfitLoss compact collapsed={!!collapsed.pl} onToggleCollapse={() => toggle('pl')} jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} />
+          <CrewReport compact collapsed={!!collapsed.crew} onToggleCollapse={() => toggle('crew')} jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
         </div>
       </div>
+      )}
     </div>
   );
 }

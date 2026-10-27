@@ -34,6 +34,16 @@ export const SERVICE_CATEGORIES = [
         startingPrice: null,
         priceNote: 'Free quote — no obligation',
       },
+      {
+        id: 'snow-removal',
+        name: 'Snow Removal',
+        icon: '❄️',
+        tagline: 'Lots cleared before you open.',
+        description: 'Plowing and salting for parking lots, driveways, and walks all winter. Outline your lot on the map, we price it per push, and our plow trucks are out early every time it snows — so your customers and tenants never wade in.',
+        benefits: ['Plowed before opening — every snowfall', 'Priced per push, no surprise bills', 'Parking lots, drives & walks', 'Live plow tracking for every visit'],
+        startingPrice: null,
+        priceNote: 'Free quote — priced per push',
+      },
     ],
   },
 ];
@@ -53,6 +63,7 @@ export const TESTIMONIALS = [
   { name: 'Tom W.', location: 'Allen Park', rating: 4, text: 'Good work and fair price. Only reason for 4 stars is a rain delay pushed my cut a couple days.' },
   { name: 'Angela S.', location: 'Lincoln Park', rating: 5, text: 'They redid our front beds and planted new shrubs. Curb appeal went way up. Customer for life.' },
   { name: 'Chris B.', location: 'Riverview', rating: 5, text: 'Signed up for weekly mowing plus fall cleanup. Easy to book and I never have to think about the yard.' },
+  { name: 'Dr. Karen H.', location: 'Allen Park', rating: 5, text: 'They plow our office lot before our 8am patients show up. Every storm last winter, not one missed push.' },
 ];
 
 export const SPECIALS = [
@@ -60,6 +71,7 @@ export const SPECIALS = [
   { title: 'Fall Cleanup Special', description: '$25 off a leaf removal cleanup booked before November 15.', code: 'LEAVES25' },
   { title: 'Season Pass', description: 'Book weekly cutting for the full season and get your spring and fall cleanups at 15% off.', code: null },
   { title: 'Free Landscaping Quotes', description: 'Thinking about new beds, mulch, or sod? We will walk your yard and quote it free.', code: null },
+  { title: 'Early-Bird Snow Contracts', description: 'Lock in your parking lot or driveway for the winter before December 1 and your first push is free.', code: 'FIRSTPUSH' },
 ];
 
 export const COMPANY_INFO = {
@@ -70,7 +82,7 @@ export const COMPANY_INFO = {
   phoneHref: 'tel:3133789982',
   email: 'service@johnslawn.com',
   address: 'Serving Downriver Michigan & Surrounding Areas',
-  hours: 'Mon–Sat, 7am–7pm',
+  hours: 'Mon–Sat, 7am–7pm · Plows run 24/7 when it snows',
   established: 2024,
   credentials: ['Licensed & Insured', 'Locally Owned & Operated', 'Commercial-Grade Equipment', 'Satisfaction Guaranteed'],
   serviceAreas: ['Wyandotte', 'Downriver', 'Taylor', 'Trenton', 'Southgate', 'Allen Park', 'Lincoln Park', 'Riverview', 'Dearborn', 'Dearborn Heights'],

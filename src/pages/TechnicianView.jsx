@@ -7,6 +7,9 @@ import ExpenseModal from '../components/ExpenseModal.jsx';
 import { useExpenses } from '../hooks/useExpenses.js';
 import { useShareLocation } from '../hooks/useShareLocation.js';
 import { formatDay, todayString } from '../lib/dates.js';
+import CrewHoursCard from '../components/CrewHoursCard.jsx';
+import { usePayroll } from '../hooks/usePayroll.js';
+import { useShifts } from '../hooks/useShifts.js';
 
 // Foreman flow: head out → start cutting (starts the clock) → mark the yard cut.
 const ON_MY_WAY = { label: '🚚 On My Way',     next: 'en_route',    color: '#9c55f7' };
@@ -31,7 +34,7 @@ const dayOf = job => job.scheduledDate || todayString();
 export default function TechnicianView() {
   const { activeTechId, user, setActiveTechId, demoMode } = useApp();
   const { jobs, updateJobStatus2 } = useJobs();
-  const { technicians, updateTechLocation } = useTechnicians();
+  const { technicians, updateTechLocation, updateTechStatus } = useTechnicians();
   const { addExpense } = useExpenses({ poll: false });
   const gps = useShareLocation(activeTechId, updateTechLocation);
   const [addingExpense, setAddingExpense] = useState(false);
@@ -39,6 +42,12 @@ export default function TechnicianView() {
   const [loadingId, setLoadingId]   = useState(null);
   const [toast, setToast] = useState('');
   const today = todayString();
+  // Crew hours: this foreman's crew + today's rollout / back-at-yard.
+  const payroll = usePayroll();
+  const { shifts, saveShift } = useShifts();
+  const myCrew = payroll.employees.filter(e => e.crewId === activeTechId && e.active !== false)
+    .sort((a, b) => (a.role === 'foreman' ? -1 : b.role === 'foreman' ? 1 : a.name.localeCompare(b.name)));
+  const myShift = shifts.find(s => s.techId === activeTechId && s.date === today);
   const demoSelectableTechs = technicians.filter(t => t.status !== 'pending_approval');
   const selectedTech = demoSelectableTechs.find(t => t.id === activeTechId);
 
@@ -57,16 +66,38 @@ export default function TechnicianView() {
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(''), 5000); };
 
+  // Rain delay: put the whole route on hold, then resume where they left off.
+  const onRainDelay = selectedTech?.status === 'rain_delay';
+  const [rainBusy, setRainBusy] = useState(false);
+  const toggleRain = async () => {
+    if (!activeTechId) return;
+    setRainBusy(true);
+    const cutting = jobs.some(j => j.assignedTo === activeTechId && j.status === 'in_progress');
+    const driving = jobs.some(j => j.assignedTo === activeTechId && j.status === 'en_route');
+    await updateTechStatus(activeTechId, onRainDelay ? (cutting ? 'busy' : driving ? 'en_route' : 'available') : 'rain_delay');
+    setRainBusy(false);
+    flash(onRainDelay ? 'Route resumed.' : 'Route on rain delay. Tap Resume when it clears.');
+  };
+
   const handleTransition = async (job, t) => {
     if (!t) return;
     setLoadingId(job.id);
     const result = await updateJobStatus2(job.id, t.next);
+    if (t.next !== 'completed') { setLoadingId(null); return; }
+
+    // Marking a lawn cut puts the foreman "On My Way" to the next lawn on today's list
+    // (today's or overdue stops only — never a future day).
+    // PLANNED (not built yet): if that customer wants a heads-up text/email ("crew on the
+    // way — please move your car"), hold it for ~30 seconds after Mark Cut so the foreman
+    // can say "not yet" (lunch, gas, break) and send it later instead.
+    const next = open.find(j => j.id !== job.id && ['assigned', 'pending'].includes(j.status) && dayOf(j) <= today);
+    if (next) await updateJobStatus2(next.id, 'en_route');
     setLoadingId(null);
-    if (t.next === 'completed') {
-      flash(result?.nextJob
-        ? `${job.clientName} marked cut. Next cut scheduled for ${formatDay(result.nextJob.scheduledDate)}.`
-        : `${job.clientName} marked cut.`);
-    }
+
+    const repeat = result?.nextJob ? ` Next visit ${formatDay(result.nextJob.scheduledDate)}.` : '';
+    flash(next
+      ? `${job.clientName} marked cut. On my way to ${String(next.address || '').split(',')[0]}.${repeat}`
+      : `${job.clientName} marked cut — that's the last one today.${repeat}`);
   };
 
   const handleExpense = async (exp) => {
@@ -86,8 +117,17 @@ export default function TechnicianView() {
           <button type="button" className="btn-ghost" onClick={() => setAddingExpense(true)} style={{ padding: '10px 16px', fontSize: '14px', fontWeight: 600 }}>
             ⛽ Add Gas / Expense
           </button>
+          <button type="button" className={onRainDelay ? 'btn-primary' : 'btn-ghost'} onClick={toggleRain} disabled={rainBusy || !activeTechId}
+            style={{ padding: '10px 16px', fontSize: '14px', fontWeight: 600, ...(onRainDelay ? { background: '#3fb950', borderColor: '#3fb950' } : { color: '#58a6ff', borderColor: '#58a6ff66' }) }}>
+            {onRainDelay ? '☀️ Resume Route' : '🌧 Rain Delay'}
+          </button>
           <span style={{ fontSize: '12px', fontWeight: 600, color: GPS_LABEL[gps].color }}>{GPS_LABEL[gps].text}</span>
         </div>
+        {onRainDelay && (
+          <div role="status" style={{ marginTop: '12px', background: '#58a6ff1f', border: '1px solid #58a6ff66', color: '#58a6ff', borderRadius: '8px', padding: '10px 14px', fontSize: '14px', fontWeight: 600 }}>
+            🌧 Route on rain delay — the owner can see it. Tap ☀️ Resume Route when you're back to cutting.
+          </div>
+        )}
         {demoMode && demoSelectableTechs.length > 0 && (
           <div style={{ marginTop: '12px', maxWidth: '320px' }}>
             <label className="form-label" style={{ display: 'block', marginBottom: '6px' }}>Switch Foreman (Demo)</label>
@@ -99,6 +139,16 @@ export default function TechnicianView() {
           </div>
         )}
       </div>
+
+      <CrewHoursCard
+        foremanId={activeTechId}
+        date={today}
+        shift={myShift}
+        crew={myCrew}
+        savedHours={payroll.settings.hours || {}}
+        onSaveShift={saveShift}
+        onSaveHours={payroll.setHours}
+      />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
         {[
@@ -152,7 +202,7 @@ export default function TechnicianView() {
                           key={step.next}
                           className={i === 0 ? 'btn-primary' : 'btn-ghost'}
                           onClick={e => { e.stopPropagation(); handleTransition(job, step); }}
-                          disabled={isLoading}
+                          disabled={isLoading || onRainDelay}
                           style={i === 0
                             ? { background: step.color, borderColor: step.color, padding: '12px 22px', fontSize: '15px', flex: '1 1 auto' }
                             : { padding: '12px 18px', fontSize: '15px', flex: '0 1 auto' }}

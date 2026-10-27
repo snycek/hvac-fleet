@@ -199,3 +199,298 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   .crew-map-grid > aside { max-height: 200px; border-right: none !important; border-bottom: 1px solid var(--border); }
   .crew-map-grid > div { min-height: 360px; }
 }
+
+/* Demo "+$40" pill: pops up over the lawn, floats, fades (about 3 s) */
+.money-burst { background: none; border: none; }
+.money-burst span {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  white-space: nowrap;
+  background: #3fb950;
+  color: #fff;
+  font-weight: 800;
+  font-size: 18px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  animation: money-burst 3s ease-out forwards;
+  pointer-events: none;
+}
+@keyframes money-burst {
+  0%   { opacity: 0; transform: translate(-50%, -60%) scale(0.6); }
+  12%  { opacity: 1; transform: translate(-50%, -110%) scale(1.15); }
+  25%  { transform: translate(-50%, -120%) scale(1); }
+  80%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -260%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .money-burst span { animation: money-burst-fade 3s linear forwards; }
+  @keyframes money-burst-fade { 0%, 80% { opacity: 1; transform: translate(-50%, -110%); } 100% { opacity: 0; transform: translate(-50%, -110%); } }
+}
+/* P/L number flash when money changes */
+.pl-flash { animation: pl-flash 2s ease-out; }
+@keyframes pl-flash { 0% { transform: scale(1.2); text-shadow: 0 0 16px currentColor; } 25% { transform: scale(1.12); text-shadow: 0 0 14px currentColor; } 100% { transform: scale(1); text-shadow: none; } }
+
+/* Keep Leaflet's controls (z-index 400–1000) inside the map so sticky bars stay on top */
+.leaflet-container { z-index: 0; }
+.money-burst.expense span { background: #da3633; }
+
+/* ===== Logged-in shell: navbar + a main area that fills the window ===== */
+.dash-shell { height: 100vh; display: flex; flex-direction: column; }
+.dash-shell-main { flex: 1; min-height: 0; overflow: auto; }
+
+/* ===== Owner hub: everything on one screen (desktop), stacked on smaller screens ===== */
+.owner-dash { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 12px; }
+.dash-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash-kpis { display: flex; gap: 10px; flex: 1; min-width: 0; flex-wrap: wrap; }
+.dash-kpi { padding: 2px 12px; min-width: 0; border-left: 1px solid var(--border); }
+.dash-kpi:first-child { border-left: none; padding-left: 0; }
+.dash-kpi-value { font-size: 20px; font-weight: 800; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; max-width: 100%; }
+.dash-kpi-label { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.dash-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.dash-panel { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.dash-panel-head { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; flex-shrink: 0; }
+.dash-panel-title { font-size: 13px; font-weight: 700; margin-right: auto; white-space: nowrap; }
+.dash-panel-body { padding: 8px 10px; overflow: auto; min-height: 0; flex: 1; }
+.dash-map { position: relative; min-height: 380px; flex: 1; }
+.dash-center { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; min-height: 0; }
+.dash-map > div { position: absolute; inset: 0; }
+.dash-trucks { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 8px; align-content: start; }
+.dash-tabs { display: flex; gap: 2px; }
+.dash-tabs button { border: none; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 12.5px; padding: 5px 9px; border-radius: 6px; cursor: pointer; }
+.dash-tabs button[aria-selected="true"] { background: var(--accent-teal)22; color: var(--accent-teal); }
+@media (max-width: 1199px) {
+  .dash-kpis { flex-basis: 100%; }
+  .dash-panel-body { max-height: 560px; }
+}
+@media (max-width: 640px) {
+  .kpi-group { flex-basis: 100%; }
+}
+/* Desktop: lock to the window, three columns, panels scroll inside themselves. */
+@media (min-width: 1200px) and (min-height: 700px) {
+  .owner-dash { height: 100%; overflow: hidden; }
+  .dash-main { flex: 1; min-height: 0; grid-template-columns: var(--col1, minmax(270px, 19fr)) var(--col2, minmax(0, 34fr)) var(--col3, minmax(250px, 22fr)) var(--col4, minmax(340px, 25fr)); }
+  .dash-col > .dash-panel.dash-routes { flex: 0 1 auto; max-height: 62%; }
+  .dash-col > .dash-panel { flex: 1 1 0; }
+  .dash-map { min-height: 0; }
+}
+
+/* Demo rain: blue wash + falling streaks over the map */
+.rain-overlay {
+  z-index: 600; pointer-events: none; display: flex; align-items: flex-start; justify-content: center; padding-top: 12px;
+  background:
+    repeating-linear-gradient(105deg, rgba(170, 205, 255, 0.35) 0 1.5px, transparent 1.5px 14px),
+    linear-gradient(rgba(30, 64, 120, 0.38), rgba(30, 64, 120, 0.38));
+  background-size: 140px 140px, auto;
+  animation: rain-fall 0.45s linear infinite;
+}
+.rain-overlay span {
+  background: #1f6febee; color: #fff; font-weight: 800; font-size: 13px; padding: 5px 12px; border-radius: 999px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+@keyframes rain-fall { from { background-position: 0 0, 0 0; } to { background-position: -38px 140px, 0 0; } }
+@media (prefers-reduced-motion: reduce) { .rain-overlay { animation: none; } }
+
+/* ===== Hub polish ===== */
+.owner-dash { gap: 12px; padding: 12px 14px 14px; }
+.dash-main { gap: 12px; }
+.dash-col { gap: 12px; }
+.dash-title { min-width: 140px; }
+.kpi-group { background: var(--bg-surface); border: 1px solid var(--border); border-radius: 12px; padding: 7px 12px 8px; min-width: 0; }
+.kpi-group-title { font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 2px; }
+.kpi-row { display: grid; }
+.dash-kpi-value { font-size: 21px; }
+.dash-kpi-label { text-transform: none; letter-spacing: 0; font-size: 11.5px; }
+.dash-panel { border-radius: 12px; }
+.dash-panel-head { min-height: 44px; padding: 8px 12px; gap: 10px; }
+.dash-panel-title { font-size: 13.5px; }
+.dash-panel-body { padding: 10px 12px; }
+.dash-head-note { font-size: 12px; color: var(--text-muted); font-weight: 400; }
+.dash-panel-foot { border-top: 1px solid var(--border); padding: 7px 12px; flex-shrink: 0; }
+.dash-tabs button { display: inline-flex; align-items: center; gap: 6px; }
+.tab-count { background: #f0b42926; color: #f0b429; border-radius: 999px; padding: 0 7px; font-size: 11px; line-height: 18px; }
+.tab-count.muted { background: var(--bg-elevated); color: var(--text-muted); }
+
+/* Demo bar */
+.demo-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 7px 12px; background: var(--bg-surface); border: 1px solid #f0b42955; border-radius: 12px; }
+.demo-play { width: 34px; height: 34px; border-radius: 50%; border: none; color: #fff; font-size: 14px; cursor: pointer; flex-shrink: 0; }
+.demo-sep { width: 1px; align-self: stretch; background: var(--border); }
+.demo-event { background: #3fb95022; color: #3fb950; border: 1px solid #3fb95055; font-weight: 700; border-radius: 999px; padding: 3px 11px; font-size: 12.5px; white-space: nowrap; }
+.demo-action { padding: 5px 10px !important; font-size: 12px !important; }
+
+/* Live activity feed */
+.feed { list-style: none; margin: 0; padding: 0; }
+.feed li { display: grid; grid-template-columns: 62px 20px minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 2px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.feed li:last-child { border-bottom: none; }
+.feed-time { color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 11.5px; }
+.feed-icon { text-align: center; }
+.feed-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted); }
+.feed-text b { color: var(--text-primary); font-weight: 600; }
+.feed-amount { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Collapsible panels */
+.collapse-btn { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 13px; width: 22px; height: 22px; border-radius: 6px; line-height: 1; flex-shrink: 0; padding: 0; }
+.collapse-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
+.dash-panel.collapsed > .dash-panel-head { border-bottom: none; }
+@media (min-width: 1200px) and (min-height: 700px) {
+  .dash-col > .dash-panel.collapsed { flex: 0 0 auto !important; max-height: none; }
+}
+/* Stacked layout: fixed heights so new rows scroll inside a panel instead of pushing the page */
+@media (max-width: 1199px), (max-height: 699px) {
+  .dash-col > .dash-panel:not(.collapsed) { height: 460px; }
+  .dash-col > .dash-panel.dash-routes:not(.collapsed) { height: 400px; }
+  .dash-panel-body { max-height: none; }
+}
+
+/* Top numbers scale with screen width (bigger on wide monitors) */
+.dash-kpi-value { font-size: clamp(21px, 1.7vw, 36px); }
+.dash-kpi-label { font-size: clamp(11.5px, 0.72vw, 15px); }
+.kpi-group-title { font-size: clamp(10.5px, 0.6vw, 13px); }
+.kpi-group { padding: clamp(7px, 0.5vw, 11px) clamp(12px, 0.8vw, 16px); }
+.truck-num { font-size: clamp(18px, 1.15vw, 26px) !important; }
+.truck-num-label { font-size: clamp(10px, 0.55vw, 12px) !important; }
+
+/* ===== Crew & Payroll ===== */
+.hub-tabs { display: flex; gap: 2px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 3px; }
+.hub-tabs button { border: none; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 13px; padding: 6px 12px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.hub-tabs button[aria-selected="true"] { background: var(--accent-teal)22; color: var(--accent-teal); }
+
+.payroll { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.payroll > .dash-panel { min-height: 420px; }
+@media (min-width: 1200px) and (min-height: 700px) {
+  .payroll { flex: 1; min-height: 0; grid-template-columns: minmax(320px, 24%) minmax(0, 1fr); }
+  .payroll > .dash-panel { min-height: 0; }
+}
+
+/* Roster */
+.roster { display: flex; flex-direction: column; gap: 12px; }
+.roster-crew { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-primary); overflow: hidden; }
+.roster-crew header { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
+.roster-badge { width: 30px; height: 30px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; color: var(--accent-teal); background: var(--accent-teal)1f; border: 1px solid var(--accent-teal)55; flex-shrink: 0; }
+.roster-crew-name { font-weight: 700; font-size: 13.5px; }
+.roster-crew-sub { font-size: 11.5px; color: var(--text-muted); }
+.roster-crew ul { list-style: none; margin: 0; padding: 4px 6px; }
+.roster-crew li { display: flex; align-items: center; gap: 6px; padding: 4px 4px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.roster-crew li:last-child { border-bottom: none; }
+.roster-name { flex: 1; min-width: 0; text-align: left; background: none; border: none; color: var(--text-primary); cursor: text; font-size: 13px; padding: 3px 4px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.roster-name:hover { background: var(--bg-elevated); }
+.roster-name-input { flex: 1; min-width: 0; background: var(--bg-elevated); border: 1px solid var(--accent-teal); color: var(--text-primary); border-radius: 5px; padding: 3px 6px; font-size: 13px; }
+.roster-hr { font-size: 11px; color: var(--text-muted); margin-left: -4px; }
+.roster-move { background: var(--bg-elevated); color: var(--text-muted); border: 1px solid var(--border); border-radius: 5px; font-size: 11.5px; padding: 2px 3px; max-width: 84px; }
+.roster-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 5px; }
+.roster-remove:hover { color: #ff7b72; background: #ff7b7218; }
+.roster-add { display: flex; gap: 6px; padding: 7px 10px 9px; }
+.roster-add > input { flex: 1; min-width: 0; background: var(--bg-elevated); border: 1px dashed var(--border); color: var(--text-primary); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; }
+.roster-add .btn-primary { padding: 4px 12px; font-size: 12px; }
+.role-chip { margin-left: 6px; font-size: 10px; font-weight: 700; color: #9c55f7; background: #9c55f71f; border: 1px solid #9c55f755; border-radius: 999px; padding: 0 6px; vertical-align: 1px; }
+
+.pay-rate { display: inline-flex; align-items: center; gap: 1px; color: var(--text-muted); font-size: 12.5px; }
+.pay-rate input { width: 46px; background: transparent; border: 1px solid transparent; border-radius: 5px; color: var(--text-primary); font-size: 12.5px; padding: 2px 4px; font-variant-numeric: tabular-nums; }
+.pay-rate input:hover { border-color: var(--border); }
+.pay-rate input:focus { border-color: var(--accent-teal); background: var(--bg-elevated); outline: none; }
+
+/* Payroll head + summary */
+.pay-week { display: flex; align-items: center; gap: 6px; margin-right: auto; font-weight: 700; font-size: 13px; }
+.pay-week .btn-ghost { padding: 3px 9px; font-size: 12px; }
+.pay-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); cursor: pointer; }
+.pay-switch input { accent-color: #58a6ff; width: 15px; height: 15px; }
+.dash-panel-head .btn-primary, .dash-panel-head .btn-ghost { padding: 5px 12px; font-size: 12.5px; }
+.pay-summary { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.pay-summary > div { padding: 10px 14px; border-left: 1px solid var(--border); min-width: 0; }
+.pay-summary > div:first-child { border-left: none; }
+.pay-summary-value { font-size: clamp(19px, 1.5vw, 30px); font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pay-summary-label { font-size: clamp(11px, 0.7vw, 14px); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) { .pay-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* Payroll table */
+.pay-table-wrap { flex: 1; min-height: 0; overflow: auto; }
+.pay-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: clamp(12.5px, 0.75vw, 14.5px); font-variant-numeric: tabular-nums; }
+.pay-table th, .pay-table td { padding: 6px 8px; text-align: center; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.pay-table .left { text-align: left; }
+.pay-table thead th { position: sticky; top: 0; z-index: 2; background: var(--bg-elevated); color: var(--text-muted); font-weight: 700; font-size: 12px; }
+.pay-table thead th span { display: block; font-weight: 500; font-size: 11px; opacity: 0.8; }
+.pay-table thead th.today { color: var(--accent-teal); }
+.pay-table tfoot td { position: sticky; bottom: 0; z-index: 2; background: var(--bg-elevated); font-weight: 800; border-top: 2px solid var(--border); border-bottom: none; }
+.pay-table .crew-row td { background: var(--bg-primary); font-weight: 700; color: var(--text-primary); text-align: center; padding-top: 9px; }
+.pay-table .crew-row td:first-child { text-align: left; }
+.pay-table .crew-row span { color: var(--text-muted); font-weight: 500; }
+.pay-table tbody tr:not(.crew-row):hover td { background: #ffffff06; }
+.pay-table tr.is-paid td { opacity: 0.72; }
+.pay-table .num { text-align: right; }
+.pay-table .strong { font-weight: 700; }
+.pay-name { font-weight: 600; }
+.pay-cell { position: relative; padding: 3px 4px !important; }
+.pay-cell input { width: 54px; text-align: center; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--text-primary); font-size: inherit; padding: 4px 2px; font-variant-numeric: tabular-nums; }
+.pay-cell input:hover { border-color: var(--border); }
+.pay-cell input:focus { border-color: var(--accent-teal); background: var(--bg-elevated); outline: none; }
+.pay-cell input::placeholder { color: var(--text-muted); opacity: 0.6; }
+.pay-cell.edited input { background: #f0b4291c; border-color: #f0b42966; color: #f0b429; font-weight: 700; }
+.pay-reset { position: absolute; top: 1px; right: 0; border: none; background: none; color: #f0b429; font-size: 11px; cursor: pointer; padding: 0 2px; opacity: 0; }
+.pay-cell:hover .pay-reset, .pay-reset:focus { opacity: 1; }
+.pay-mark { background: transparent; border: 1px solid #3fb95066; color: #3fb950; border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pay-mark:hover { background: #3fb9501a; }
+.pay-paid { background: #3fb9501a; border: 1px solid transparent; color: #3fb950; border-radius: 6px; padding: 3px 10px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.pay-paid:hover { border-color: #3fb95066; }
+.pay-foot { font-size: 11.5px; color: var(--text-muted); }
+.muted { color: var(--text-muted); }
+
+/* Foreman: crew hours card */
+.crew-hours { padding: 16px; margin-bottom: 20px; }
+.crew-hours-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.crew-hours-head h2 { font-size: 17px; font-weight: 700; }
+.crew-hours-head span { color: var(--text-muted); font-size: 13px; }
+.crew-hours-times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.crew-time { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; min-width: 0; }
+.crew-time-label { font-size: 12px; color: var(--text-muted); margin-bottom: 5px; white-space: nowrap; }
+.crew-time input[type="time"] { width: 100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 7px; padding: 6px 8px; font-size: 16px; font-weight: 700; color-scheme: dark; }
+.crew-time .btn-primary { width: 100%; padding: 9px 6px; font-size: 13px; }
+.crew-time-total { font-size: 20px; font-weight: 800; padding: 3px 0; }
+.crew-hours-list { list-style: none; margin: 0 0 10px; padding: 0; border-top: 1px solid var(--border); }
+.crew-hours-list li { display: flex; align-items: center; gap: 8px; padding: 8px 2px; border-bottom: 1px solid var(--border); }
+.crew-hours-list li.off span { color: var(--text-muted); text-decoration: line-through; }
+.crew-hours-list label { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 15px; min-width: 0; cursor: pointer; }
+.crew-hours-list input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--accent-teal); flex-shrink: 0; }
+.crew-hours-input { width: 70px; text-align: center; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 7px; padding: 7px 6px; font-size: 16px; font-weight: 700; }
+.crew-hours-input:disabled { opacity: 0.4; }
+.crew-hours-unit { color: var(--text-muted); font-size: 13px; }
+.crew-hours-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.crew-hours-foot span { color: var(--text-muted); font-size: 13px; }
+.crew-hours-foot .btn-primary { padding: 11px 18px; font-size: 14px; }
+.crew-hours-sent { margin-top: 8px; color: #3fb950; font-size: 13px; font-weight: 600; }
+.crew-hours-error { margin-top: 8px; color: #ff7b72; font-size: 13px; }
+.crew-hours-empty { color: var(--text-muted); font-size: 13px; }
+@media (max-width: 480px) { .crew-hours-times { grid-template-columns: 1fr 1fr; } .crew-hours-times .crew-time:last-child { grid-column: span 2; } }
+
+/* Collections */
+.unpaid-row.past-due { background: #f0b4290d; box-shadow: inset 3px 0 0 #f0b429; }
+.yield { margin-right: 5px; }
+.reminded { color: #58a6ff; font-size: 12px; }
+.remind-btn { padding: 3px 9px !important; font-size: 12px !important; }
+.past-due-count { color: #f0b429; text-transform: none; letter-spacing: 0; }
+
+/* Mark paid: pick how they paid */
+.pay-choose { flex-basis: 100%; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px; background: var(--bg-elevated); border-radius: 8px; font-size: 12px; }
+.pay-choose > span:first-child { color: var(--text-muted); margin-right: 2px; }
+.pay-choose button { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer; font-weight: 600; }
+.pay-choose button:hover { border-color: #3fb950; color: #3fb950; }
+.pay-choose-card { display: inline-flex; gap: 4px; align-items: center; }
+.pay-choose select { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 3px 4px; font-size: 11.5px; }
+.unpaid-row.problem { background: #ff7b720d; box-shadow: inset 3px 0 0 #ff7b72; }
+
+/* Row buttons (Remind + Mark paid) always share a line, pushed right */
+.row-actions { display: inline-flex; gap: 6px; flex-wrap: nowrap; margin-left: auto; white-space: nowrap; }
+
+/* Falling snow over the live map on snow days */
+.snowfall { position: absolute; inset: 0; pointer-events: none; z-index: 450; border-radius: 8px; overflow: hidden;
+  background-image:
+    radial-gradient(4px 4px at 20px 30px, #fff 55%, #9fb6cc 70%, transparent 72%),
+    radial-gradient(3px 3px at 90px 70px, #fff 55%, #9fb6cc 70%, transparent 72%),
+    radial-gradient(5px 5px at 150px 20px, #fff 55%, #9fb6cc 70%, transparent 72%),
+    radial-gradient(3px 3px at 60px 125px, #fff 55%, #9fb6cc 70%, transparent 72%),
+    radial-gradient(4px 4px at 130px 150px, #fff 55%, #9fb6cc 70%, transparent 72%),
+    radial-gradient(3px 3px at 180px 100px, #fff 55%, #9fb6cc 70%, transparent 72%);
+  background-size: 200px 180px; background-color: rgba(200, 220, 240, 0.12); animation: snowfall 6s linear infinite; }
+@keyframes snowfall { from { background-position: 0 0; } to { background-position: 40px 180px; } }
+@media (prefers-reduced-motion: reduce) { .snowfall { animation: none; } }

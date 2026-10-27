@@ -13,7 +13,7 @@ export const SATELLITE_TILES = {
 
 export const ZONE_COLORS = ['#4ade80', '#facc15', '#38bdf8', '#f472b6', '#fb923c', '#a78bfa', '#2dd4bf', '#f87171'];
 
-export const ZONE_NAME_SUGGESTIONS = ['Front Yard', 'Back Yard', 'Side Yard', 'Garden Bed', 'Hillside', 'Other'];
+export const ZONE_NAME_SUGGESTIONS = ['Front Yard', 'Back Yard', 'Side Yard', 'Garden Bed', 'Hillside', 'Parking Lot', 'Driveway', 'Sidewalks', 'Other'];
 
 // Default view when an address can't be found: Downriver Michigan.
 export const DEFAULT_CENTER = [42.2142, -83.1499];

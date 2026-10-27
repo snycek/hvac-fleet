@@ -200,7 +200,7 @@ export default function Landing({ setPage, mode = 'home' }) {
           </div>
 
           <p style={{ fontSize: isMobileHero ? '16px' : '18px', color: 'var(--text-muted)', maxWidth: '560px', lineHeight: 1.7, marginBottom: '24px' }}>
-            Weekly lawn cutting, fall leaf removal, and free landscaping quotes — with upfront pricing and a crew that shows up when we say we will.
+            Weekly lawn cutting, fall leaf removal, free landscaping quotes, and winter snow removal — with upfront pricing and a crew that shows up when we say we will.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center', width: 'min(100%, ' + ctaStackWidth + 'px)', margin: '0 auto' }}>

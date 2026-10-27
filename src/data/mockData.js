@@ -1,6 +1,10 @@
 // Downriver Michigan mock data (313 area code)
 
 export const mockTechnicians = [
+  // Plow trucks: out when it snows, parked the rest of the year.
+  { id: 'plow-001', name: 'Gus Petrov', email: 'gus@fleetpro.demo', truckName: 'Plow 1', kind: 'plow', isSeasoned: true, status: 'offline', location: { lat: 42.2575, lng: -83.2105 }, totalEarnings: 0, jobsCompleted: 0 },
+  { id: 'plow-002', name: 'Walt Kozak', email: 'walt@fleetpro.demo', truckName: 'Plow 2', kind: 'plow', isSeasoned: true, status: 'offline', location: { lat: 42.2575, lng: -83.2105 }, totalEarnings: 0, jobsCompleted: 0 },
+  { id: 'plow-003', name: 'Bo Jensen', email: 'bo@fleetpro.demo', truckName: 'Plow 3', kind: 'plow', isSeasoned: true, status: 'offline', location: { lat: 42.2575, lng: -83.2105 }, totalEarnings: 0, jobsCompleted: 0 },
   {
     id: 'tech-001',
     name: 'Marcus Williams',

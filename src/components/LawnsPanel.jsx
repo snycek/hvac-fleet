@@ -1,5 +1,5 @@
-import { Fragment, useState } from 'react';
-import { allLawns, money, shortDate } from '../lib/lawns.js';
+import { Fragment, memo, useState } from 'react';
+import { allLawns, isPastDue, money, shortDate } from '../lib/lawns.js';
 import { relativeDay, repeatLabel } from '../lib/dates.js';
 import { formatSqFt } from '../lib/zones.js';
 
@@ -7,16 +7,17 @@ const th = { padding: '10px 12px', textAlign: 'left', color: 'var(--text-muted)'
 const td = { padding: '10px 12px', whiteSpace: 'nowrap' };
 
 /** Every lawn at a glance: numbers only. Tap a row for its payment history. */
-export default function LawnsPanel({ jobs, markPaid }) {
+// bare: no title (the hub panel shows its own) and no outer card.
+function LawnsPanel({ jobs, markPaid, today, bare = false }) {
   const [open, setOpen] = useState(null);
   const lawns = allLawns(jobs).sort((a, b) => (b.owed - a.owed) || (b.cuts - a.cuts));
 
   if (!lawns.length) return null;
 
   return (
-    <section style={{ marginBottom: '28px' }}>
-      <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '14px' }}>🌱 Lawns</h2>
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+    <section style={{ marginBottom: bare ? 0 : '28px' }}>
+      {!bare && <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '14px' }}>🌱 Lawns</h2>}
+      <div className={bare ? undefined : 'card'} style={{ padding: 0, overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
@@ -30,7 +31,7 @@ export default function LawnsPanel({ jobs, markPaid }) {
                 <Fragment key={l.key}>
                   <tr onClick={() => setOpen(isOpen ? null : l.key)} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', background: isOpen ? 'var(--bg-elevated)' : 'transparent' }}>
                     <td style={{ ...td, whiteSpace: 'normal', minWidth: '150px' }}>
-                      <div style={{ fontWeight: 600 }}>{isOpen ? '▾' : '▸'} {l.name}{l.notes ? ' 📝' : ''}</div>
+                      <div style={{ fontWeight: 600 }}>{isOpen ? '▾' : '▸'} {l.history.some(j => isPastDue(j, today)) && <span title="30+ days past due" aria-label="30+ days past due">⚠️ </span>}{l.name}{l.notes ? ' 📝' : ''}</div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{String(l.address).split(',')[0]}</div>
                     </td>
                     <td style={td}>{l.cuts}</td>
@@ -38,7 +39,7 @@ export default function LawnsPanel({ jobs, markPaid }) {
                     <td style={{ ...td, color: '#3fb950', fontWeight: 600 }}>{money(l.paid)}</td>
                     <td style={{ ...td, color: l.owed ? '#f0b429' : 'var(--text-muted)', fontWeight: 600 }}>{l.owed ? money(l.owed) : '—'}</td>
                     <td style={td}>{shortDate(l.lastCut)}</td>
-                    <td style={td}>{l.nextCut ? relativeDay(l.nextCut) : '—'}</td>
+                    <td style={td}>{l.nextCut ? relativeDay(l.nextCut, today) : '—'}</td>
                   </tr>
                   {isOpen && (
                     <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
@@ -87,3 +88,5 @@ export default function LawnsPanel({ jobs, markPaid }) {
     </section>
   );
 }
+
+export default memo(LawnsPanel);

@@ -1,25 +1,45 @@
-import { useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import ExpenseModal from './ExpenseModal.jsx';
 import { receiptUrl } from '../hooks/useExpenses.js';
-import { expenseType, money, monthLabel, profitAndLoss, shiftMonth, shortDate } from '../lib/lawns.js';
+import { METHODS } from '../lib/payments.js';
+import PeriodPicker from './PeriodPicker.jsx';
+import CollapseButton from './CollapseButton.jsx';
+import { expenseType, money, periodRange, profitAndLoss, shortDate, effectiveAnchor } from '../lib/lawns.js';
 import { todayString } from '../lib/dates.js';
 
-const Stat = ({ label, value, color }) => (
-  <div style={{ background: 'var(--bg-primary)', borderRadius: '10px', padding: '14px 10px', textAlign: 'center' }}>
-    <div style={{ fontSize: '24px', fontWeight: 800, color }}>{value}</div>
-    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
+// Big number that flashes whenever it changes (money coming in).
+function Stat({ label, value, color, compact }) {
+  const [flash, setFlash] = useState(0);
+  const prev = useRef(value);
+  useEffect(() => {
+    if (prev.current === value) return undefined;
+    prev.current = value;
+    const id = setTimeout(() => setFlash(f => f + 1), 0);
+    return () => clearTimeout(id);
+  }, [value]);
+  return (
+  <div style={{ background: 'var(--bg-primary)', borderRadius: '8px', padding: compact ? '7px 6px' : '14px 10px', textAlign: 'center', minWidth: 0 }}>
+    <div key={flash} className={flash ? 'pl-flash' : undefined} style={{ fontSize: compact ? '18px' : '24px', fontWeight: 800, color, display: 'inline-block' }}>{value}</div>
+    <div style={{ fontSize: compact ? '10px' : '11px', color: 'var(--text-muted)', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{label}</div>
   </div>
-);
+  );
+}
 
-/** Monthly profit & loss: paid cuts in, logged expenses out. */
-export default function ProfitLoss({ jobs, expenses, technicians, addExpense }) {
-  const thisMonth = todayString().slice(0, 7);
-  const [month, setMonth] = useState(thisMonth);
+/** Profit & loss for a day, week, or month: paid cuts in, logged expenses out. */
+function ProfitLoss({ jobs, expenses, technicians, addExpense, today = todayString(), compact = false, collapsed = false, onToggleCollapse, payments = [] }) {
+  const [period, setPeriod] = useState({ mode: 'month', anchor: today, pinned: false });
   const [adding, setAdding] = useState(false);
-  const pl = profitAndLoss(jobs, expenses, month);
+  const pl = profitAndLoss(jobs, expenses, periodRange(period.mode, effectiveAnchor(period, today)));
 
+  // Money in and out only (unpaid cuts show as Owed and in To-Do). Who cut what lives in the Crew Report.
   const ledger = [
-    ...pl.income.map(j => ({ id: j.id, date: j.paidAt, icon: '💵', label: j.clientName, amount: j.earnings || 0 })),
+    ...pl.income.map(j => {
+      // How the money came in: card (brand ••last4), cash, or check.
+      const p = j.paymentId ? payments.find(x => x.id === j.paymentId) : null;
+      const method = METHODS[p?.method || j.paymentMethod] || METHODS.cash;
+      const how = p?.method === 'card' ? `${p.brand} ••${p.last4}` : method.label.toLowerCase();
+      return { id: j.id, date: j.paidAt, icon: method.icon, label: `${j.clientName} · ${how}`, amount: j.earnings || 0 };
+    }),
     ...pl.spent.map(e => ({
       id: e.id, date: e.date, icon: expenseType(e.category).icon,
       label: [expenseType(e.category).label, technicians.find(t => t.id === e.techId)?.name.split(' ')[0], e.note].filter(Boolean).join(' · '),
@@ -28,41 +48,45 @@ export default function ProfitLoss({ jobs, expenses, technicians, addExpense }) 
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   return (
-    <section className="card" style={{ padding: '18px', marginBottom: '28px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 700, marginRight: 'auto' }}>📊 P/L</h2>
-        <button type="button" className="btn-ghost" onClick={() => setMonth(m => shiftMonth(m, -1))} aria-label="Previous month" style={{ padding: '6px 12px' }}>‹</button>
-        <span style={{ fontWeight: 700, minWidth: '130px', textAlign: 'center' }}>{monthLabel(month)}</span>
-        <button type="button" className="btn-ghost" onClick={() => setMonth(m => shiftMonth(m, 1))} disabled={month >= thisMonth} aria-label="Next month" style={{ padding: '6px 12px', opacity: month >= thisMonth ? 0.4 : 1 }}>›</button>
-        <button type="button" className="btn-primary" onClick={() => setAdding(true)} style={{ padding: '7px 14px', fontSize: '13px' }}>+ Expense</button>
+    <section className={compact ? `dash-panel${collapsed ? ' collapsed' : ''}` : 'card'} style={compact ? undefined : { padding: '18px', marginBottom: '28px' }}>
+      <div className={compact ? 'dash-panel-head' : undefined} style={compact ? undefined : { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px', flexWrap: 'wrap' }}>
+        {compact && onToggleCollapse && <CollapseButton collapsed={collapsed} onToggle={onToggleCollapse} label="P/L" />}
+        <h2 className={compact ? 'dash-panel-title' : undefined} style={compact ? undefined : { fontSize: '18px', fontWeight: 700, marginRight: 'auto' }}>📊 P/L</h2>
+        {!collapsed && <PeriodPicker value={period} onChange={setPeriod} today={today} compact={compact} />}
+        {!collapsed && <button type="button" className="btn-primary" onClick={() => setAdding(true)} style={{ padding: compact ? '4px 10px' : '7px 14px', fontSize: compact ? '12px' : '13px' }}>+ Expense</button>}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '10px', marginBottom: '12px' }}>
-        <Stat label="Income" value={money(pl.incomeTotal)} color="#3fb950" />
-        <Stat label="Expenses" value={money(pl.expenseTotal)} color="#ff7b72" />
-        <Stat label="Net" value={money(pl.net)} color={pl.net >= 0 ? 'var(--accent-teal)' : '#ff7b72'} />
+      {!collapsed && <div className={compact ? 'dash-panel-body' : undefined} style={compact ? { display: 'flex', flexDirection: 'column', overflow: 'hidden' } : undefined}>
+      <div style={{ display: 'grid', gridTemplateColumns: compact ? 'repeat(4, minmax(0, 1fr))' : 'repeat(auto-fit, minmax(110px, 1fr))', gap: compact ? '6px' : '10px', marginBottom: compact ? '8px' : '12px' }}>
+        <Stat compact={compact} label="Income" value={money(pl.incomeTotal)} color="#3fb950" />
+        <Stat compact={compact} label="Owed" value={money(pl.owedTotal)} color="#f0b429" />
+        <Stat compact={compact} label="Expenses" value={money(pl.expenseTotal)} color="#ff7b72" />
+        <Stat compact={compact} label="Net" value={money(pl.net)} color={pl.net >= 0 ? 'var(--accent-teal)' : '#ff7b72'} />
       </div>
 
-      <div style={{ display: 'flex', gap: '14px', flexWrap: 'wrap', fontSize: '13px', color: 'var(--text-muted)', marginBottom: ledger.length ? '12px' : 0 }}>
+      <div style={{ display: 'flex', gap: compact ? '10px' : '14px', flexWrap: 'wrap', fontSize: compact ? '12px' : '13px', color: 'var(--text-muted)', marginBottom: ledger.length ? (compact ? '6px' : '12px') : 0 }}>
         {pl.byType.map(t => <span key={t.id}>{t.icon} {money(t.total)}</span>)}
-        <span>💵 {pl.income.length} paid</span>
+        <span>💵 {pl.income.length} received</span>
+        <span>✂️ {pl.owed.length} unpaid</span>
       </div>
 
       {ledger.length > 0 && (
-        <div style={{ maxHeight: '260px', overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
+        <div style={compact ? { flex: 1, minHeight: 0, overflowY: 'auto', borderTop: '1px solid var(--border)' } : { maxHeight: '260px', overflowY: 'auto', borderTop: '1px solid var(--border)' }}>
           {ledger.map(row => (
-            <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '7px 2px', borderBottom: '1px solid var(--border)', fontSize: '13px' }}>
+            <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: compact ? '4px 2px' : '7px 2px', borderBottom: '1px solid var(--border)', fontSize: compact ? '12px' : '13px' }}>
               <span style={{ width: '42px', color: 'var(--text-muted)' }}>{shortDate(row.date)}</span>
               <span>{row.icon}</span>
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
               {row.receipt && <a href={row.receipt} target="_blank" rel="noreferrer" title="Receipt" style={{ textDecoration: 'none' }}>🧾</a>}
-              <span style={{ fontWeight: 700, color: row.amount >= 0 ? '#3fb950' : '#ff7b72', width: '80px', textAlign: 'right' }}>
+              <span style={{ fontWeight: 700, color: row.owed ? '#f0b429' : row.amount >= 0 ? '#3fb950' : '#ff7b72', width: '80px', textAlign: 'right' }}>
                 {row.amount >= 0 ? '+' : ''}{money(row.amount, true)}
               </span>
             </div>
           ))}
         </div>
       )}
+
+      </div>}
 
       {adding && (
         <ExpenseModal
@@ -75,3 +99,5 @@ export default function ProfitLoss({ jobs, expenses, technicians, addExpense }) 
     </section>
   );
 }
+
+export default memo(ProfitLoss);

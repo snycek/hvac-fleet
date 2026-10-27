@@ -15,9 +15,9 @@ const vertexIcon = (color) => L.divIcon({
   iconSize: [0, 0],
 });
 
-function nextZoneName(zones) {
+function nextZoneName(zones, names = ZONE_NAME_SUGGESTIONS) {
   const used = new Set(zones.map(z => z.name));
-  const free = ZONE_NAME_SUGGESTIONS.find(n => n !== 'Other' && !used.has(n));
+  const free = names.find(n => n !== 'Other' && !used.has(n));
   return free || `Zone ${zones.length + 1}`;
 }
 
@@ -27,7 +27,10 @@ function nextZoneName(zones) {
  * readOnly: just shows the zones (used on the dispatch side).
  * showArea: label zones with their square footage (customers only see names).
  */
-export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true }) {
+// zoneNames: the order new zones are named in (snow quotes start with Parking Lot).
+export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames }) {
+  const zoneNamesRef = useRef(zoneNames);
+  useEffect(() => { zoneNamesRef.current = zoneNames; }, [zoneNames]);
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
@@ -46,6 +49,8 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
       zoomControl: true,
       attributionControl: true,
       scrollWheelZoom: !readOnly,
+      // Small read-only maps on phones shouldn't trap page scrolling (two fingers still pan/zoom).
+      dragging: !(readOnly && L.Browser.mobile),
     });
     L.tileLayer(SATELLITE_TILES.url, SATELLITE_TILES.options).addTo(map);
     layerRef.current = L.layerGroup().addTo(map);
@@ -183,7 +188,7 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     if (pts.length < 3) return;
     const zone = {
       id: `zone-${Date.now()}`,
-      name: nextZoneName(current),
+      name: nextZoneName(current, zoneNamesRef.current),
       color: ZONE_COLORS[current.length % ZONE_COLORS.length],
       points: pts,
     };

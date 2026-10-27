@@ -15,9 +15,9 @@ export default function PageLayout({ page, setPage, children }) {
 
   if (isDashboard) {
     return (
-      <div>
+      <div className="dash-shell">
         <Navbar page={page} setPage={setPage} />
-        <main>{children}</main>
+        <main className="dash-shell-main">{children}</main>
       </div>
     );
   }

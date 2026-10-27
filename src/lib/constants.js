@@ -8,10 +8,14 @@ export const JOB_STATUS = {
   declined:    { label: 'Declined',    color: '#8b949e' },
 };
 
+// Status for a driver: plow trucks say "Plowing" where mowers say "Cutting".
+export const statusOf = tech => (tech?.kind === 'plow' && tech.status === 'busy' ? { ...TECH_STATUS.busy, label: 'Plowing' } : TECH_STATUS[tech?.status]);
+
 export const TECH_STATUS = {
   available:        { label: 'Available',        color: '#3fb950' },
-  busy:             { label: 'On Job',           color: '#e67e22' },
+  busy:             { label: 'Cutting',          color: '#e67e22' },
   en_route:         { label: 'En Route',         color: '#9c55f7' },
   offline:          { label: 'Offline',          color: '#8b949e' },
+  rain_delay:       { label: 'Rain Delay',       color: '#58a6ff' },
   pending_approval: { label: 'Pending Approval', color: '#d29922' },
 };

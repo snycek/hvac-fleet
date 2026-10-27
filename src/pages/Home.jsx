@@ -27,7 +27,7 @@ export default function Home({ setPage }) {
           marginBottom: '18px',
           textTransform: 'uppercase',
         }}>
-          Downriver Michigan's Trusted Lawn Crew
+          Downriver Michigan's Trusted Lawn & Snow Crew
         </div>
         <h1 style={{ lineHeight: 1.4 }}>
           Cut.<br />
@@ -35,7 +35,7 @@ export default function Home({ setPage }) {
           <span style={{ color: 'var(--accent-teal)' }}>Done Right.</span>
         </h1>
         <p style={{ maxWidth: '560px', margin: '0 auto 24px', lineHeight: 1.7 }}>
-          {COMPANY_INFO.name} keeps Downriver yards sharp — weekly lawn cutting, fall leaf removal, and free landscaping quotes, with upfront pricing and a crew that shows up when we say we will.
+          {COMPANY_INFO.name} keeps Downriver properties sharp all year — weekly lawn cutting, fall leaf removal, free landscaping quotes, and winter snow removal, with upfront pricing and a crew that shows up when we say we will.
         </p>
         <button className="btn-primary" onClick={() => setPage('quote')} style={{ padding: '14px 32px', fontSize: '16px' }}>
           Request a Quote

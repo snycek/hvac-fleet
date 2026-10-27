@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { TECH_STATUS } from '../lib/constants.js';
+import { TECH_STATUS, statusOf } from '../lib/constants.js';
 import { lawnKey, lawnStats } from '../lib/lawns.js';
 
 // Fix Leaflet default icon URLs broken by Vite
@@ -17,6 +17,7 @@ const STATUS_COLORS = {
   busy:      '#e67e22',
   en_route:  '#9c55f7',
   offline:   '#8b949e',
+  rain_delay: '#58a6ff',
 };
 
 const CAB_COLORS = {
@@ -24,62 +25,98 @@ const CAB_COLORS = {
   '#e67e22': '#b85c0f',
   '#9c55f7': '#6d2dcc',
   '#8b949e': '#5a6270',
+  '#58a6ff': '#1f6feb',
 };
+
+// Pickup with a front plow blade, facing right. Snow spray while plowing.
+function makePlowIcon(status, name) {
+  const color = STATUS_COLORS[status] || '#8b949e';
+  const cab = CAB_COLORS[color] || '#444';
+  const initials = name.split(' ').map(n => n[0]).join('');
+  const spray = status === 'busy' ? `
+  <circle cx="68" cy="30" r="2.2" fill="#fff"/><circle cx="66" cy="24" r="1.8" fill="#e6f2ff"/><circle cx="70" cy="36" r="1.6" fill="#fff"/><circle cx="63" cy="20" r="1.4" fill="#fff"/>` : '';
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="52" viewBox="0 0 72 52">
+  <ellipse cx="34" cy="50" rx="28" ry="3" fill="rgba(0,0,0,0.3)"/>
+  ${spray}
+  <!-- Bed + cab -->
+  <path d="M4,28 L30,28 L30,40 L4,40 Q2,40 2,38 L2,30 Q2,28 4,28 Z" fill="${color}"/>
+  <path d="M30,18 Q30,16 32,16 L42,16 Q45,16 47,20 L50,27 L54,28 Q57,29 57,32 L57,40 L30,40 Z" fill="${color}"/>
+  <path d="M33,19 L42,19 Q44,19 45,21 L47,26 L33,26 Z" fill="#bfe3ff" opacity="0.85"/>
+  <rect x="30" y="28" width="27" height="2" fill="${cab}"/>
+  <!-- Amber light -->
+  <rect x="36" y="12" width="6" height="4" rx="1.5" fill="#f0b429"/>
+  <!-- Blade -->
+  <path d="M58,22 Q66,30 64,44 L60,44 L60,24 Z" fill="#c9ced6" stroke="#6b7280" stroke-width="1"/>
+  <rect x="56" y="33" width="5" height="3" fill="#3a3f47"/>
+  <!-- Wheels -->
+  <circle cx="14" cy="41" r="7" fill="#15171c"/><circle cx="14" cy="41" r="3" fill="#9aa4b2"/>
+  <circle cx="46" cy="41" r="7" fill="#15171c"/><circle cx="46" cy="41" r="3" fill="#9aa4b2"/>
+  <!-- Driver badge -->
+  <circle cx="10" cy="11" r="8" fill="${color}" stroke="white" stroke-width="2.5"/>
+  <text x="10" y="14" font-size="8" text-anchor="middle" fill="white" font-weight="bold" font-family="sans-serif">${initials}</text>
+</svg>`;
+  return L.divIcon({ html: svg, className: '', iconSize: [72, 52], iconAnchor: [36, 50], popupAnchor: [0, -54] });
+}
+const iconFor = tech => (tech.kind === 'plow' ? makePlowIcon : makeVanIcon)(tech.status, tech.name);
 
 function makeVanIcon(status, name) {
   const color    = STATUS_COLORS[status] || '#8b949e';
   const cab      = CAB_COLORS[color] || '#444';
   const initials = name.split(' ').map(n => n[0]).join('');
 
+  // Raindrops over a mower that's on rain delay.
+  const rain = status === 'rain_delay' ? `
+  <path d="M20,3 l-2,5 M30,1 l-2,5 M40,3 l-2,5 M25,9 l-2,5 M45,9 l-2,5" stroke="#58a6ff" stroke-width="2" stroke-linecap="round"/>` : '';
+
+  // Grass flying out the side while cutting.
+  const clippings = status === 'busy' ? `
+  <path d="M22,47 l-3,-6 M27,48 l-1,-7 M32,47 l2,-6" stroke="#4ade80" stroke-width="2" stroke-linecap="round"/>
+  <path d="M17,49 l-5,-3 M37,49 l5,-4" stroke="#86efac" stroke-width="1.6" stroke-linecap="round"/>` : '';
+
+  // Riding mower, side view, facing right. Body color = status.
   const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="72" height="52" viewBox="0 0 72 52">
   <!-- Drop shadow -->
-  <ellipse cx="34" cy="50" rx="26" ry="3.5" fill="rgba(0,0,0,0.28)"/>
+  <ellipse cx="36" cy="50" rx="27" ry="3" fill="rgba(0,0,0,0.3)"/>
+  ${clippings}
+  ${rain}
 
-  <!-- Van body (cargo section) -->
-  <rect x="2" y="13" width="44" height="24" rx="5" fill="${color}"/>
+  <!-- Cutting deck (under the body, between the wheels) -->
+  <path d="M20,40 L54,40 Q57,40 57,43 L57,45 L18,45 L18,42 Q18,40 20,40 Z" fill="#3a3f47"/>
+  <rect x="18" y="43.5" width="39" height="1.6" fill="#1f2328"/>
 
-  <!-- Cab section -->
-  <path d="M42,13 L60,13 Q68,13 68,20 L68,33 Q68,37 62,37 L42,37 Z" fill="${cab}"/>
+  <!-- Body / hood -->
+  <path d="M10,26 L46,26 Q60,26 66,33 L67,37 Q67,40 64,40 L12,40 Q8,40 8,36 L8,29 Q8,26 10,26 Z" fill="${color}"/>
+  <path d="M46,26 Q60,26 66,33 L67,37 L52,37 Q50,30 46,26 Z" fill="${cab}"/>
+  <!-- Grille -->
+  <rect x="61" y="31.5" width="5" height="5" rx="1" fill="rgba(0,0,0,0.25)"/>
+  <!-- Headlight -->
+  <circle cx="64.5" cy="30.5" r="1.6" fill="#fff6c2"/>
+  <!-- Stripe -->
+  <rect x="22" y="31" width="26" height="2.4" rx="1.2" fill="rgba(255,255,255,0.45)"/>
 
-  <!-- Windshield -->
-  <path d="M43,15 L58,15 Q65,15 65,20 L65,27 L43,27 Z" fill="#b8dff5" opacity="0.88"/>
+  <!-- Seat -->
+  <path d="M12,26 L28,26 Q30,26 30,23 L30,22 L14,22 Q12,22 12,24 Z" fill="#20242a"/>
+  <path d="M10,26 L14,26 L16,10 Q16,8 14,8 L12,8 Q10,8 10,10 Z" fill="#20242a"/>
 
-  <!-- Door window -->
-  <rect x="31" y="15" width="10" height="10" rx="2.5" fill="#b8dff5" opacity="0.72"/>
+  <!-- Steering column + wheel -->
+  <line x1="40" y1="26" x2="35" y2="13" stroke="#20242a" stroke-width="2.6" stroke-linecap="round"/>
+  <ellipse cx="35" cy="12" rx="6" ry="2" fill="none" stroke="#20242a" stroke-width="2.4"/>
 
-  <!-- Cab/body divider -->
-  <line x1="42" y1="13" x2="42" y2="37" stroke="rgba(0,0,0,0.25)" stroke-width="2"/>
+  <!-- Rear wheel (big) -->
+  <circle cx="17" cy="39" r="10" fill="#15171c"/>
+  <circle cx="17" cy="39" r="5.5" fill="#f1c40f"/>
+  <circle cx="17" cy="39" r="2" fill="#15171c"/>
 
-  <!-- Door handle -->
-  <rect x="34" y="28" width="5" height="2" rx="1" fill="rgba(255,255,255,0.45)"/>
+  <!-- Front wheel (small) -->
+  <circle cx="56" cy="43" r="6" fill="#15171c"/>
+  <circle cx="56" cy="43" r="3" fill="#f1c40f"/>
+  <circle cx="56" cy="43" r="1.2" fill="#15171c"/>
 
-  <!-- Snowflake on body -->
-  <text x="20" y="30" font-size="16" text-anchor="middle">❄️</text>
-
-  <!-- Front bumper -->
-  <rect x="64" y="32" width="5" height="4" rx="2" fill="${cab}"/>
-
-  <!-- Rear bumper -->
-  <rect x="2" y="32" width="5" height="5" rx="1.5" fill="${color}"/>
-
-  <!-- Rear wheel -->
-  <circle cx="15" cy="38" r="8" fill="#1a1a2e"/>
-  <circle cx="15" cy="38" r="4.5" fill="#2e2e44"/>
-  <circle cx="15" cy="38" r="2"   fill="#555577"/>
-
-  <!-- Front wheel -->
-  <circle cx="53" cy="38" r="8" fill="#1a1a2e"/>
-  <circle cx="53" cy="38" r="4.5" fill="#2e2e44"/>
-  <circle cx="53" cy="38" r="2"   fill="#555577"/>
-
-  <!-- Wheel arches -->
-  <path d="M7,31 Q7,26 15,26 Q23,26 23,31"  fill="${color}" stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
-  <path d="M45,31 Q45,26 53,26 Q61,26 61,31" fill="${cab}"   stroke="rgba(0,0,0,0.2)" stroke-width="1"/>
-
-  <!-- Status badge -->
-  <circle cx="65" cy="7" r="8"   fill="${color}" stroke="white" stroke-width="2.5"/>
-  <text   x="65" y="11" font-size="8" text-anchor="middle" fill="white" font-weight="bold">${initials}</text>
+  <!-- Foreman badge -->
+  <circle cx="63" cy="9" r="8" fill="${color}" stroke="white" stroke-width="2.5"/>
+  <text x="63" y="12" font-size="8" text-anchor="middle" fill="white" font-weight="bold" font-family="sans-serif">${initials}</text>
 </svg>`;
 
   return L.divIcon({
@@ -152,10 +189,23 @@ function buildPopup(tech, jobs, statusInfo, color) {
     </div>`;
 }
 
-export default function FleetMap({ technicians = [], jobs = [], selectedTechId = null }) {
+const LAWN_COLORS = { completed: '#3fb950', in_progress: '#e67e22', en_route: '#9c55f7' };
+
+/**
+ * lawns:  optional [{ id, lat, lng, name, status }] drawn as dots (demo route).
+ * bursts: optional [{ id, lat, lng, text }] "+$40" pills that float up and fade.
+ * fitBounds: optional [[lat, lng], [lat, lng]] to frame the map (e.g. demo area).
+ * outline: optional { ring: [[lat, lng], ...], label } service-area boundary (dashed).
+ */
+export default function FleetMap({ technicians = [], jobs = [], selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false }) {
+  const lotLayer   = useRef(null);
   const mapRef     = useRef(null);
   const mapObj     = useRef(null);
   const markersRef = useRef({});
+  const lawnLayer  = useRef(null);
+  const burstRefs  = useRef({});
+  const techsRef   = useRef(technicians);
+  useEffect(() => { techsRef.current = technicians; }, [technicians]);
 
   // Initialize map once.
   useEffect(() => {
@@ -167,12 +217,19 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
           center: [42.18, -83.19], // Downriver MI
           zoom: 12,
           zoomControl: true,
+          // Locked so scrolling the page never moves the map: zoom with +/−.
+          // On phones, one finger scrolls the page; two fingers move/zoom the map.
+          scrollWheelZoom: false,
+          dragging: !L.Browser.mobile,
+          touchZoom: true,
+          // Quarter-step zoom so a tall, narrow area (like ZIP 48101) fills the map snugly.
+          zoomSnap: 0.25,
         });
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           attribution: '© OpenStreetMap contributors',
           maxZoom: 18,
         }).addTo(mapObj.current);
-      } catch (e) {
+      } catch {
         mapObj.current = mapRef.current._leaflet_map || mapObj.current;
       }
     }
@@ -182,9 +239,96 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
         mapObj.current.remove();
         mapObj.current = null;
         markersRef.current = {};
+        lawnLayer.current = null;
+        lotLayer.current = null;
+        burstRefs.current = {};
       }
     };
   }, []);
+
+  // Frame a given area (demo mode zooms to Allen Park).
+  const boundsKey = fitBounds ? JSON.stringify(fitBounds) : '';
+  useEffect(() => {
+    if (!mapObj.current || !boundsKey) return;
+    mapObj.current.fitBounds(JSON.parse(boundsKey), { padding: [30, 30] });
+  }, [boundsKey]);
+
+  // When the map's box changes size (layout stacks on narrow screens, window resizes),
+  // re-measure so the view doesn't drift, and re-frame the area if one was given.
+  const boundsRef = useRef(boundsKey);
+  useEffect(() => { boundsRef.current = boundsKey; }, [boundsKey]);
+  useEffect(() => {
+    const el = mapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    let last = '';
+    const ro = new ResizeObserver(([entry]) => {
+      const size = `${Math.round(entry.contentRect.width)}x${Math.round(entry.contentRect.height)}`;
+      if (size === last || !mapObj.current) return;
+      last = size;
+      mapObj.current.invalidateSize();
+      if (boundsRef.current) mapObj.current.fitBounds(JSON.parse(boundsRef.current), { padding: [30, 30] });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Service-area boundary (e.g. ZIP 48101), drawn under everything else.
+  const outlineKey = outline ? JSON.stringify(outline) : '';
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !outlineKey) return undefined;
+    const { ring, label } = JSON.parse(outlineKey);
+    const shape = L.polygon(ring, { color: '#f0b429', weight: 2.5, dashArray: '8 6', fillColor: '#f0b429', fillOpacity: 0.05, interactive: false }).addTo(map);
+    if (label) shape.bindTooltip(label, { permanent: true, direction: 'center', className: 'zone-label' });
+    shape.bringToBack();
+    return () => shape.remove();
+  }, [outlineKey]);
+
+  // Lawn dots for the demo route.
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map) return;
+    if (!lawnLayer.current) lawnLayer.current = L.layerGroup().addTo(map);
+    lawnLayer.current.clearLayers();
+    (lawns || []).forEach(l => {
+      const color = LAWN_COLORS[l.status] || '#8b949e';
+      L.circleMarker([l.lat, l.lng], { radius: 7, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 })
+        .bindTooltip(`${l.name} · $${l.price}`, { direction: 'top', offset: [0, -6] })
+        .addTo(lawnLayer.current);
+    });
+  }, [lawns]);
+
+  // Parking-lot outlines: the plow's geofence for each lot on today's route.
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map) return;
+    if (!lotLayer.current) lotLayer.current = L.layerGroup().addTo(map);
+    lotLayer.current.clearLayers();
+    (lots || []).forEach(l => {
+      const color = LAWN_COLORS[l.status] || '#58a6ff';
+      L.polygon(l.ring, { color, weight: 2, fillColor: color, fillOpacity: l.status === 'completed' ? 0.35 : 0.18 })
+        .bindTooltip(`❄️ ${l.name} · $${l.price}/push`, { direction: 'top', sticky: true })
+        .addTo(lotLayer.current);
+    });
+  }, [lots]);
+
+  // "+$40" pills: add new ones, drop finished ones.
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map) return;
+    const live = new Set((bursts || []).map(b => b.id));
+    (bursts || []).forEach(b => {
+      if (burstRefs.current[b.id]) return;
+      burstRefs.current[b.id] = L.marker([b.lat, b.lng], {
+        icon: L.divIcon({ className: `money-burst${b.kind === 'expense' ? ' expense' : ''}`, html: `<span>${b.text}</span>`, iconSize: [0, 0] }),
+        interactive: false,
+        zIndexOffset: 2000,
+      }).addTo(map);
+    });
+    Object.keys(burstRefs.current).forEach(id => {
+      if (!live.has(id)) { burstRefs.current[id].remove(); delete burstRefs.current[id]; }
+    });
+  }, [bursts]);
 
   // Sync markers from technician/job state.
   useEffect(() => {
@@ -196,18 +340,27 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
       if (!tech.location?.lat) return;
       seen.add(tech.id);
       const pos        = [tech.location.lat, tech.location.lng];
-      const statusInfo = TECH_STATUS[tech.status] || { label: tech.status };
+      const statusInfo = statusOf(tech) || { label: tech.status };
       const color      = STATUS_COLORS[tech.status] || '#8b949e';
       const popup      = buildPopup(tech, jobs, statusInfo, color);
 
-      if (markersRef.current[tech.id]) {
-        markersRef.current[tech.id].setLatLng(pos);
-        markersRef.current[tech.id].setIcon(makeVanIcon(tech.status, tech.name));
-        markersRef.current[tech.id].setPopupContent(popup);
+      const existing = markersRef.current[tech.id];
+      if (existing) {
+        existing.setLatLng(pos);
+        if (existing._lawnStatus !== tech.status) {
+          existing.setIcon(iconFor(tech));
+          existing._lawnStatus = tech.status;
+        }
+        if (existing._lawnPopup !== popup) {
+          existing.setPopupContent(popup);
+          existing._lawnPopup = popup;
+        }
       } else {
-        const marker = L.marker(pos, { icon: makeVanIcon(tech.status, tech.name) })
+        const marker = L.marker(pos, { icon: iconFor(tech), zIndexOffset: 1000 })
           .bindPopup(popup, { maxWidth: 260 })
           .addTo(map);
+        marker._lawnStatus = tech.status;
+        marker._lawnPopup = popup;
         markersRef.current[tech.id] = marker;
       }
     });
@@ -221,18 +374,21 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
     });
   }, [technicians, jobs]);
 
-  // Focus selected technician marker from fleet list.
+  // Focus the truck picked in the crew list (once per pick, so moving trucks don't yank the map).
   useEffect(() => {
     if (!selectedTechId || !mapObj.current) return;
     const marker = markersRef.current[selectedTechId];
-    if (!marker) return;
-
+    const tech = techsRef.current.find(t => t.id === selectedTechId);
+    if (!marker || !tech?.location) return;
     const map = mapObj.current;
-    map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 13), { duration: 0.5 });
+    map.flyTo([tech.location.lat, tech.location.lng], Math.max(map.getZoom(), 14), { duration: 0.5 });
     marker.openPopup();
-  }, [selectedTechId, technicians]);
+  }, [selectedTechId]);
 
   return (
-    <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '8px' }} />
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '8px' }} />
+      {snowing && <div className="snowfall" aria-hidden="true" />}
+    </div>
   );
 }

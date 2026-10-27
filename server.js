@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 import { mockJobs } from './src/data/mockData.js';
 import { mockTechnicians } from './src/data/mockData.js';
 import { suggestAddresses } from './src/lib/addressSuggest.js';
+import { applyPaymentResult, simulateCardCharge, voidPayment } from './src/lib/payments.js';
 
 // Load .env manually for ESM
 try {
@@ -63,8 +64,34 @@ app.use(express.json({ limit: '8mb' }));
 const jobs = mockJobs.map((job) => ({ ...job }));
 const technicians = mockTechnicians.map((tech) => ({ ...tech }));
 const expenses = [];
+const payments = []; // money received (or attempted): see src/lib/payments.js
+const delays = []; // rain delays: { techId, date, start, end, minutes }
 
-const EXPENSE_CATEGORIES = ['gas', 'maintenance', 'other'];
+// ---- Crew & payroll ----
+// employees: foremen (linked to a technician) and their cutters, each with an hourly rate.
+const employees = [];
+// payroll.hours: owner's edits { 'empId@YYYY-MM-DD': hours }, payroll.paid: { 'empId@weekStart': ISO paid time }
+// payroll.payRain: whether rain-delay time counts as paid hours.
+const payroll = { hours: {}, paid: {}, payRain: false };
+// Each truck's day as the foreman logs it: rolled out → back at the yard.
+const shifts = []; // { techId, date, start, end }
+
+function seedEmployees() {
+  const firsts = ['Jose', 'Kyle', 'Andre', 'Tyler', 'Luis', 'Brandon', 'Marco', 'Devin', 'Ricky', 'Shawn', 'Eddie', 'Nate', 'Omar', 'Cody', 'Trey', 'Hector', 'Jake', 'Dante', 'Gabe', 'Vince', 'Pedro'];
+  const lasts = ['Ramirez', 'Kowalski', 'Hill', 'Brooks', 'Mendoza', 'Price', 'Rossi', 'Grant', 'Flores', 'Wade', 'Nguyen', 'Shaw', 'Haddad', 'Lane', 'Ortiz', 'Cruz', 'Reed', 'Webb', 'Soto', 'Kane', 'Diaz'];
+  let n = 0;
+  technicians.filter((t) => t.status !== 'pending_approval').forEach((t) => {
+    // Plow trucks run with just the driver.
+    employees.push({ id: `emp-${t.id}`, name: t.name, role: 'foreman', crewId: t.id, rate: t.kind === 'plow' ? 26 : 24, active: true });
+    for (let i = 0; i < (t.kind === 'plow' ? 0 : 3); i++) {
+      employees.push({ id: `emp-c${n}`, name: `${firsts[n % firsts.length]} ${lasts[(n * 5) % lasts.length]}`, role: 'cutter', crewId: t.id, rate: 15 + (n % 4), active: true });
+      n++;
+    }
+  });
+}
+seedEmployees();
+
+const EXPENSE_CATEGORIES = ['gas', 'maintenance', 'other', 'card_fees'];
 
 // Demo history so lawn stats and the P/L have numbers before real use.
 function seedDemoHistory() {
@@ -180,7 +207,8 @@ function sanitizeQuote(quote) {
   return {
     zones,
     totalSqFt: zones.reduce((s, z) => s + z.sqFt, 0),
-    estimate: Math.max(0, Math.round(Number(quote.estimate) || 0)),
+    // null = John prices it (snow removal).
+    estimate: quote.estimate == null ? null : Math.max(0, Math.round(Number(quote.estimate) || 0)),
     wanted: (Array.isArray(quote.wanted) ? quote.wanted : []).slice(0, 5).map(s => String(s).slice(0, 40)),
   };
 }
@@ -252,7 +280,7 @@ app.post('/api/contact', async (req, res) => {
   };
   jobs.unshift(createdJob);
 
-  const body = `🌱 New John's Lawn Request\nName: ${name}\nPhone: ${phone}${email ? `\nEmail: ${email}` : ''}\nAddress: ${fullAddress || 'Not provided'}\nService: ${service}${quote ? `\nMeasured: ${quote.totalSqFt.toLocaleString()} sq ft (${quote.zones.length} zones), estimate $${quote.estimate}` : ''}${bestTime ?`\nBest Time: ${bestTime}` : ''}\nNotes: ${message || 'None'}`;
+  const body = `🌱 New John's Lawn Request\nName: ${name}\nPhone: ${phone}${email ? `\nEmail: ${email}` : ''}\nAddress: ${fullAddress || 'Not provided'}\nService: ${service}${quote ? `\nMeasured: ${quote.totalSqFt.toLocaleString()} sq ft (${quote.zones.length} zones)${quote.estimate == null ? ', you price it' : `, estimate $${quote.estimate}`}` : ''}${bestTime ?`\nBest Time: ${bestTime}` : ''}\nNotes: ${message || 'None'}`;
   console.log('[SMS]', body);
 
   if (!twilioClient) {
@@ -411,6 +439,8 @@ app.put('/api/jobs/:id/schedule', (req, res) => {
     assignedTo: techId,
     scheduledDate,
     repeatDays: repeat,
+    // Snow customers get pushed every snowfall (dispatched when it snows), not on a repeat.
+    perSnowfall: req.body.perSnowfall === true,
     earnings: amount,
     acceptedAt: new Date().toISOString(),
   };
@@ -419,11 +449,78 @@ app.put('/api/jobs/:id/schedule', (req, res) => {
 });
 
 // Owner marks a finished cut paid (or un-paid if tapped by mistake).
+// Replace the contents of our in-memory lists with a new version.
+function commitBooks(next) {
+  jobs.splice(0, jobs.length, ...next.jobs);
+  payments.splice(0, payments.length, ...next.payments);
+  expenses.splice(0, expenses.length, ...next.expenses);
+}
+
+// Owner marks a finished cut paid by cash/check (or card, which runs a test charge),
+// or un-paid if tapped by mistake.
 app.put('/api/jobs/:id/paid', (req, res) => {
+  const job = jobs.find((j) => j.id === req.params.id);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  if (req.body?.paid === false) {
+    commitBooks(voidPayment({ jobs, payments, expenses }, job.id));
+    return res.json(jobs.find((j) => j.id === job.id));
+  }
+  const method = ['cash', 'check', 'card'].includes(req.body?.method) ? req.body.method : 'cash';
+  const result = method === 'card'
+    ? simulateCardCharge({ jobIds: [job.id], amount: job.earnings || 0, last4: req.body?.last4 })
+    : { processorId: `manual_${Date.now()}_${job.id}`, jobIds: [job.id], amount: job.earnings || 0, method, status: 'succeeded', at: new Date().toISOString() };
+  const next = applyPaymentResult({ jobs, payments, expenses }, result);
+  commitBooks(next);
+  return res.json({ ...jobs.find((j) => j.id === job.id), payment: next.payment });
+});
+
+// ---- Payments received ----
+app.get('/api/payments', (_req, res) => res.json(payments));
+
+// Where a card processor reports a payment result (approved / declined).
+// Connecting Stripe/PayPal/Square later = translate their webhook into this shape.
+app.post('/api/payments/result', (req, res) => {
+  const r = req.body || {};
+  if (!Array.isArray(r.jobIds) || !r.jobIds.every((id) => jobs.some((j) => j.id === id))) {
+    return res.status(400).json({ error: 'jobIds must be existing jobs' });
+  }
+  if (!['succeeded', 'failed'].includes(r.status)) return res.status(400).json({ error: 'status must be succeeded or failed' });
+  const next = applyPaymentResult({ jobs, payments, expenses }, {
+    processorId: String(r.processorId || '').slice(0, 80) || undefined,
+    jobIds: r.jobIds, amount: Number(r.amount) || undefined, status: r.status,
+    method: ['card', 'cash', 'check'].includes(r.method) ? r.method : 'card',
+    brand: r.brand ? String(r.brand).slice(0, 20) : null, last4: r.last4 ? String(r.last4).slice(-4) : null,
+    reason: r.reason ? String(r.reason).slice(0, 120) : null,
+    at: r.at && !Number.isNaN(Date.parse(r.at)) ? r.at : new Date().toISOString(),
+  });
+  commitBooks(next);
+  console.log(`[PAYMENT] ${next.payment?.status} ${next.payment?.method} $${next.payment?.amount} ${next.payment?.clientName}${next.duplicate ? ' (duplicate ignored)' : ''}`);
+  return res.json({ payment: next.payment, duplicate: Boolean(next.duplicate) });
+});
+
+// Test processor: charge a card for unpaid cuts (last4 picks approve/decline).
+app.post('/api/payments/charge', (req, res) => {
+  const { jobIds, last4 } = req.body || {};
+  const picked = jobs.filter((j) => (jobIds || []).includes(j.id) && j.status === 'completed' && !j.paid);
+  if (!picked.length) return res.status(400).json({ error: 'nothing unpaid to charge' });
+  const result = simulateCardCharge({ jobIds: picked.map((j) => j.id), amount: picked.reduce((s, j) => s + (j.earnings || 0), 0), last4 });
+  const next = applyPaymentResult({ jobs, payments, expenses }, result);
+  commitBooks(next);
+  return res.json({ payment: next.payment });
+});
+
+// Payment reminder to the customer for an unpaid cut. Logged on the job with the exact
+// message. (Customer texting/email isn't connected yet — this records it and prints it.)
+app.post('/api/jobs/:id/remind', (req, res) => {
   const idx = jobs.findIndex((j) => j.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'job not found' });
-  const paid = req.body?.paid !== false;
-  jobs[idx] = { ...jobs[idx], paid, paidAt: paid ? new Date().toISOString() : null };
+  const job = jobs[idx];
+  if (job.status !== 'completed' || job.paid) return res.status(400).json({ error: 'only unpaid finished cuts get reminders' });
+  const channel = ['text', 'email'].includes(req.body?.channel) ? req.body.channel : 'text';
+  const message = String(req.body?.message || '').slice(0, 500);
+  const reminder = { at: new Date().toISOString(), channel, message, delivered: false };
+  jobs[idx] = { ...job, reminders: [...(job.reminders || []), reminder] };
+  console.log(`[REMIND] ${channel} → ${job.clientName} ${job.clientPhone || ''}: ${message}`);
   return res.json(jobs[idx]);
 });
 
@@ -585,8 +682,110 @@ app.put('/api/technicians/:id/status', (req, res) => {
     return res.status(400).json({ error: 'status is required' });
   }
 
+  // Rain delay log: opening/closing a delay as the foreman toggles it.
+  const before = technicians[idx].status;
+  const now = new Date();
+  if (status === 'rain_delay' && before !== 'rain_delay') {
+    delays.unshift({ id: `delay-${Date.now()}`, techId: id, reason: 'rain', date: todayString(), start: now.toISOString(), end: null, minutes: null });
+  } else if (before === 'rain_delay' && status !== 'rain_delay') {
+    const open = delays.find((d) => d.techId === id && !d.end);
+    if (open) {
+      open.end = now.toISOString();
+      open.minutes = Math.max(1, Math.round((now - new Date(open.start)) / 60000));
+    }
+  }
+
   technicians[idx] = { ...technicians[idx], status };
   return res.json(technicians[idx]);
+});
+
+// Rain delays (newest first). Open ones have end: null.
+app.get('/api/delays', (_req, res) => res.json(delays));
+
+// ---- Crew & payroll ----
+const cleanEmployee = (body, base = {}) => {
+  const out = { ...base };
+  if (body.name !== undefined) out.name = String(body.name).trim().slice(0, 60);
+  if (body.rate !== undefined) out.rate = Math.max(0, Math.min(500, Math.round(Number(body.rate) * 100) / 100 || 0));
+  if (body.crewId !== undefined && technicians.some((t) => t.id === body.crewId)) out.crewId = body.crewId;
+  if (body.role !== undefined && ['foreman', 'cutter'].includes(body.role)) out.role = body.role;
+  if (body.active !== undefined) out.active = Boolean(body.active);
+  return out;
+};
+
+app.get('/api/employees', (_req, res) => res.json(employees));
+
+app.post('/api/employees', (req, res) => {
+  const emp = cleanEmployee(req.body || {}, { id: `emp-${Date.now()}-${Math.floor(Math.random() * 1000)}`, role: 'cutter', rate: 15, active: true });
+  if (!emp.name) return res.status(400).json({ error: 'name is required' });
+  if (!emp.crewId) return res.status(400).json({ error: 'a valid crew (foreman) is required' });
+  employees.push(emp);
+  res.status(201).json(emp);
+});
+
+app.put('/api/employees/:id', (req, res) => {
+  const idx = employees.findIndex((e) => e.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'employee not found' });
+  employees[idx] = cleanEmployee(req.body || {}, employees[idx]);
+  if (!employees[idx].name) return res.status(400).json({ error: 'name is required' });
+  res.json(employees[idx]);
+});
+
+app.get('/api/payroll', (_req, res) => res.json(payroll));
+
+// Owner edits one day's hours (hours: null clears the edit and goes back to the truck's time).
+app.put('/api/payroll/hours', (req, res) => {
+  const { empId, date, hours } = req.body || {};
+  if (!employees.some((e) => e.id === empId) || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+    return res.status(400).json({ error: 'empId and date are required' });
+  }
+  const key = `${empId}@${date}`;
+  if (hours === null || hours === '') delete payroll.hours[key];
+  else payroll.hours[key] = Math.max(0, Math.min(24, Math.round(Number(hours) * 4) / 4 || 0));
+  res.json(payroll);
+});
+
+// Mark a week paid / unpaid for some employees.
+app.put('/api/payroll/paid', (req, res) => {
+  const { weekStart, empIds, paid } = req.body || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart || '')) || !Array.isArray(empIds)) {
+    return res.status(400).json({ error: 'weekStart and empIds are required' });
+  }
+  const at = new Date().toISOString();
+  for (const id of empIds) {
+    const key = `${id}@${weekStart}`;
+    if (paid === false) delete payroll.paid[key];
+    else payroll.paid[key] = at;
+  }
+  res.json(payroll);
+});
+
+// Truck days (rolled out / back at yard).
+app.get('/api/shifts', (_req, res) => res.json(shifts));
+
+// Foreman sets rollout and/or back-at-yard for a date. Times are ISO strings; null clears one.
+app.put('/api/shifts', (req, res) => {
+  const { techId, date, start, end } = req.body || {};
+  if (!technicians.some((t) => t.id === techId) || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+    return res.status(400).json({ error: 'techId and date are required' });
+  }
+  const valid = (v) => v === null || (typeof v === 'string' && !Number.isNaN(Date.parse(v)));
+  if ((start !== undefined && !valid(start)) || (end !== undefined && !valid(end))) {
+    return res.status(400).json({ error: 'start/end must be times' });
+  }
+  let shift = shifts.find((s) => s.techId === techId && s.date === date);
+  if (!shift) { shift = { techId, date, start: null, end: null }; shifts.unshift(shift); }
+  if (start !== undefined) shift.start = start;
+  if (end !== undefined) shift.end = end;
+  if (shift.start && shift.end && new Date(shift.end) < new Date(shift.start)) {
+    return res.status(400).json({ error: 'back at yard must be after rollout' });
+  }
+  res.json(shift);
+});
+
+app.put('/api/payroll/settings', (req, res) => {
+  if (req.body?.payRain !== undefined) payroll.payRain = Boolean(req.body.payRain);
+  res.json(payroll);
 });
 
 app.put('/api/technicians/:id/location', (req, res) => {

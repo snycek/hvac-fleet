@@ -10,7 +10,12 @@ const WANTED_SERVICES = [
   { id: 'lawn-cutting', name: 'Lawn Cutting', icon: '🌱' },
   { id: 'leaf-removal', name: 'Leaf Removal', icon: '🍂' },
   { id: 'landscaping-quote', name: 'Landscaping', icon: '🌳' },
+  { id: 'snow-removal', name: 'Snow Removal', icon: '❄️' },
 ];
+// Snow is priced by John per push (lots vary: islands, curbs, where the snow can go),
+// so a quote that includes it shows no instant price.
+const SNOW = 'Snow Removal';
+const SNOW_ZONE_NAMES = ['Parking Lot', 'Driveway', 'Sidewalks', 'Loading Area', 'Other'];
 
 const EMPTY_FORM = { name: '', phone: '', email: '', address: '', city: '', zip: '' };
 
@@ -30,7 +35,10 @@ export default function QuoteTool({ setPage, initialServiceId }) {
 
   const fullAddress = [form.address, form.city, form.zip].filter(Boolean).join(', ');
   const totalSqFt = zones.reduce((sum, z) => sum + areaSqFt(z.points), 0);
-  const estimate = estimatePrice(totalSqFt);
+  const snow = wanted.includes(SNOW);
+  const snowOnly = snow && wanted.length === 1;
+  const estimate = snow ? null : estimatePrice(totalSqFt);
+  const what = snowOnly ? 'Parking Lot' : snow ? 'Property' : 'Yard';
   const change = e => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
 
   const findProperty = async e => {
@@ -87,9 +95,9 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           ...form,
           service: `Quote: ${wanted.join(', ')}`,
           requested: wanted,
-          earnings: estimate,
+          ...(estimate != null ? { earnings: estimate } : {}),
           bestTime: '',
-          message: `${measured ? `Measured ${formatSqFt(totalSqFt)} (${zoneSummary}). Estimate ${formatPrice(estimate)}.` : 'Skipped measuring — call to quote.'}${notes ? ` Notes: ${notes}` : ''}`,
+          message: `${measured ? `Measured ${formatSqFt(totalSqFt)} (${zoneSummary}).${estimate != null ? ` Estimate ${formatPrice(estimate)}.` : ' John to price it.'}` : 'Skipped measuring — call to quote.'}${notes ? ` Notes: ${notes}` : ''}`,
           location: center?.manual ? null : center,
           ...(quote ? { quote } : {}),
         }),
@@ -109,16 +117,16 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   if (step === 'sent') {
     return (
       <div style={{ maxWidth: '640px', margin: '40px auto', textAlign: 'center' }}>
-        <div style={{ fontSize: '56px', marginBottom: '12px' }}>🌳</div>
+        <div style={{ fontSize: '56px', marginBottom: '12px' }}>{snowOnly ? '❄️' : '🌳'}</div>
         <h1 style={{ fontSize: '32px', fontWeight: 800, marginBottom: '10px' }}>Quote request sent!</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '16px', lineHeight: 1.7, marginBottom: '8px' }}>
           Thanks, {form.name.split(' ')[0]}.{' '}
-          {zones.length
+          {zones.length && estimate != null
             ? <>Your quote is <b style={{ color: 'var(--accent-teal)' }}>{formatPrice(estimate)}</b>.</>
-            : <>We got your request for {wanted.join(', ').toLowerCase()}.</>}
+            : <>We got your request for {wanted.join(', ').toLowerCase()}{zones.length ? ` and your ${what.toLowerCase()} outline` : ''}.</>}
         </p>
         <p style={{ color: 'var(--text-muted)', fontSize: '15px', marginBottom: '28px' }}>
-          {COMPANY_INFO.name} will reach out at {form.phone} with your quote.
+          {COMPANY_INFO.name} will reach out at {form.phone} with your {estimate == null ? 'price' : 'quote'}.
         </p>
         <button className="btn-primary" onClick={() => { setPage('home'); window.scrollTo(0, 0); }} style={{ padding: '12px 28px' }}>
           Back to Home
@@ -132,7 +140,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       <div style={{ maxWidth: '720px' }}>
         <h1 style={{ fontSize: '36px', fontWeight: 800, marginBottom: '8px' }}>Request a Quote</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '16px', lineHeight: 1.6, marginBottom: '24px' }}>
-          Tell us what you need and where. Then outline your yard on a satellite map and see your price instantly.
+          Tell us what you need and where. Then outline your yard or parking lot on a satellite map. Lawn prices show instantly; snow removal is priced by John.
         </p>
         <Steps current={1} />
         <form className="card" onSubmit={findProperty} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -199,14 +207,14 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           ← Change Address
         </button>
       </div>
-      <h1 style={{ fontSize: '30px', fontWeight: 800, marginBottom: '6px' }}>Outline Your Yard</h1>
+      <h1 style={{ fontSize: '30px', fontWeight: 800, marginBottom: '6px' }}>Outline Your {what}</h1>
       <p style={{ color: 'var(--text-muted)', fontSize: '15px', marginBottom: '18px' }}>
         {center?.manual
           ? 'Zoom in to find your property, then '
           : center?.approx
             ? <>📍 We found {form.address.replace(/^\d+\s*/, '')} — drag the map to your house, then </>
-            : <>📍 {fullAddress}. Not quite right? Drag the map to your yard. Then </>}
-        tap <b>Draw a Zone</b> and tap each corner of an area you want serviced.
+            : <>📍 {fullAddress}. Not quite right? Drag the map to your {what.toLowerCase()}. Then </>}
+        tap <b>Draw a Zone</b> and tap each corner of an area you want serviced{snow ? ' — for snow, outline every part of the lot, drive or walk you want plowed' : ''}.
       </p>
       <Steps current={2} />
 
@@ -219,6 +227,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             selectedId={selectedId}
             onSelect={setSelectedId}
             showArea={false}
+            zoneNames={snowOnly ? SNOW_ZONE_NAMES : undefined}
           />
         </div>
 
@@ -226,10 +235,12 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '1px' }}>Your Quote</div>
             <div style={{ fontSize: '40px', fontWeight: 800, color: 'var(--accent-teal)', margin: '4px 0' }}>
-              {zones.length ? formatPrice(estimate) : '—'}
+              {estimate == null ? (zones.length ? formatSqFt(totalSqFt) : '❄️') : zones.length ? formatPrice(estimate) : '—'}
             </div>
             <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              {zones.length ? 'Final price confirmed on-site' : 'Draw a zone to see your price'}
+              {estimate == null
+                ? (zones.length ? `outlined · ${COMPANY_INFO.shortName} will text your price per push` : 'Outline the area to plow')
+                : zones.length ? 'Final price confirmed on-site' : 'Draw a zone to see your price'}
             </div>
           </div>
 
@@ -265,7 +276,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             {submit.state === 'error' && <div style={{ color: '#ff7b72', fontSize: '13px' }}>{submit.msg}</div>}
             <button className="btn-primary" type="button" onClick={sendQuote} disabled={!zones.length || submit.state === 'loading'}
               style={{ padding: '13px', fontSize: '15px', opacity: zones.length ? 1 : 0.5 }}>
-              {submit.state === 'loading' ? 'Sending…' : zones.length ? `Send My Quote Request (${formatPrice(estimate)})` : 'Draw at least one zone'}
+              {submit.state === 'loading' ? 'Sending…' : !zones.length ? 'Draw at least one zone' : estimate == null ? 'Send to John for a Price' : `Send My Quote Request (${formatPrice(estimate)})`}
             </button>
             {!zones.length && (
               <button type="button" onClick={sendQuote} disabled={submit.state === 'loading'}
@@ -290,7 +301,7 @@ function Field({ label, children }) {
 }
 
 function Steps({ current }) {
-  const steps = ['Your Info', 'Outline Your Yard', 'Get Your Quote'];
+  const steps = ['Your Info', 'Outline the Area', 'Get Your Quote'];
   return (
     <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
       {steps.map((s, i) => {

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { EXPENSE_TYPES } from '../lib/lawns.js';
+import { MANUAL_EXPENSE_TYPES } from '../lib/lawns.js';
 import { todayString } from '../lib/dates.js';
 import { compressImage } from '../hooks/useExpenses.js';
 
@@ -46,7 +46,7 @@ export default function ExpenseModal({ title = 'Add Expense', requireReceipt = f
         <h3 style={{ fontWeight: 700, fontSize: '19px' }}>{title}</h3>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-          {EXPENSE_TYPES.map(t => {
+          {MANUAL_EXPENSE_TYPES.map(t => {
             const on = category === t.id;
             return (
               <button key={t.id} type="button" onClick={() => setCategory(t.id)} aria-pressed={on} style={{

@@ -170,26 +170,32 @@ export function useJobs() {
   }, []);
 
   // Owner marks a finished cut paid (paid=false undoes it).
-  const markPaid = useCallback(async (jobId, paid = true) => {
-    const patch = { paid, paidAt: paid ? new Date().toISOString() : null };
-    if (!FIREBASE_ENABLED) {
-      try {
-        const res = await fetch(`/api/jobs/${jobId}/paid`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paid }),
-        });
-        if (!res.ok) throw new Error(`Failed paid update: ${res.status}`);
-        const updated = await res.json();
-        setJobs(prev => prev.map(j => (j.id === jobId ? updated : j)));
-      } catch {
-        setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, ...patch } : j)));
-      }
-      return;
-    }
-    const { doc, updateDoc } = await import('firebase/firestore');
-    await updateDoc(doc(db, 'jobs', jobId), patch);
+  // Owner records a payment: method 'cash' | 'check' | 'card' (card runs a test charge,
+  // which can be declined). paid=false undoes it.
+  const markPaid = useCallback(async (jobId, paid = true, method = 'cash', last4) => {
+    const res = await fetch(`/api/jobs/${jobId}/paid`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paid, method, last4 }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't record payment (HTTP ${res.status})`);
+    const { payment, ...job } = data;
+    setJobs(prev => prev.map(j => (j.id === jobId ? job : j)));
+    return payment;
   }, []);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid };
+  // Payment reminder for an unpaid cut (logged on the job; texting not connected yet).
+  const remindCustomer = useCallback(async (jobId, message) => {
+    const res = await fetch(`/api/jobs/${jobId}/remind`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: 'text', message }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't send reminder (HTTP ${res.status})`);
+    setJobs(prev => prev.map(j => (j.id === jobId ? data : j)));
+  }, []);
+
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer };
 }

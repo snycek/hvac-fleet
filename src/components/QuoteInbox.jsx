@@ -21,22 +21,31 @@ function requestedServices(job) {
   return String(job.service || '').replace(/^Quote:\s*/i, '').split(',').map(s => s.trim()).filter(Boolean);
 }
 
-function AddCustomerModal({ job, foremen, onSave, onClose }) {
+const isSnow = job => requestedServices(job).includes('Snow Removal');
+// Snow jobs go to plow drivers; everything else to lawn foremen.
+const crewFor = (job, techs) => techs.filter(t => (t.kind === 'plow') === isSnow(job));
+
+function AddCustomerModal({ job, foremen: allForemen, onSave, onClose }) {
   const requested = requestedServices(job);
+  const snow = isSnow(job);
+  const foremen = crewFor(job, allForemen).length ? crewFor(job, allForemen) : allForemen;
   const [price, setPrice] = useState(String(job.quote?.estimate ?? job.earnings ?? ''));
   const [date, setDate] = useState(addDays(todayString(), 1));
-  const [repeatDays, setRepeatDays] = useState(requested.includes('Lawn Cutting') ? 7 : 0);
+  // Snow: dispatched every time it snows, not on a fixed repeat.
+  const [repeatDays, setRepeatDays] = useState(requested.includes('Lawn Cutting') && !snow ? 7 : 0);
   const [techId, setTechId] = useState(foremen.length === 1 ? foremen[0].id : '');
   const [state, setState] = useState({ saving: false, error: '' });
 
   const save = async (e) => {
     e.preventDefault();
-    if (!date || !techId) { setState({ saving: false, error: 'Pick a cut day and a foreman.' }); return; }
+    if (!date || !techId) { setState({ saving: false, error: snow ? 'Pick a start date and a plow driver.' : 'Pick a cut day and a foreman.' }); return; }
+    if (snow && !(Number(price) > 0)) { setState({ saving: false, error: 'Enter your price per push.' }); return; }
     setState({ saving: true, error: '' });
     try {
       await onSave({
         scheduledDate: date,
-        repeatDays,
+        repeatDays: snow ? 0 : repeatDays,
+        ...(snow ? { perSnowfall: true } : {}),
         price: Number(price) || 0,
         techId,
         service: requested.join(', ') || 'Lawn Service',
@@ -56,11 +65,16 @@ function AddCustomerModal({ job, foremen, onSave, onClose }) {
         </div>
 
         <div>
-          <label className="form-label">Price per cut</label>
+          <label className="form-label">{snow ? 'Price per push' : 'Price per cut'}</label>
           <div style={{ position: 'relative' }}>
             <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>$</span>
             <input className="form-input" type="number" min="0" step="1" inputMode="decimal" value={price} onChange={e => setPrice(e.target.value)} style={{ paddingLeft: '24px' }} />
           </div>
+          {snow && job.quote?.totalSqFt > 0 && (
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              They outlined {formatSqFt(job.quote.totalSqFt)} to plow.
+            </div>
+          )}
           {job.quote?.estimate != null && Number(price) !== job.quote.estimate && (
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
               Website quoted {formatPrice(job.quote.estimate)}.{' '}
@@ -70,11 +84,16 @@ function AddCustomerModal({ job, foremen, onSave, onClose }) {
         </div>
 
         <div>
-          <label className="form-label">First cut day</label>
+          <label className="form-label">{snow ? 'Plow from' : 'First cut day'}</label>
           <input className="form-input" type="date" min={todayString()} value={date} onChange={e => setDate(e.target.value)} required />
           {date && <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{formatDay(date)}</div>}
         </div>
 
+        {snow ? (
+          <div style={{ fontSize: '13px', color: 'var(--text-muted)', background: 'var(--bg-elevated)', borderRadius: '8px', padding: '10px 12px' }}>
+            ❄️ <b style={{ color: 'var(--text-primary)' }}>Every snowfall</b> — they go on the plow route and get pushed each time it snows.
+          </div>
+        ) : (
         <div>
           <label className="form-label">How often</label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
@@ -96,11 +115,12 @@ function AddCustomerModal({ job, foremen, onSave, onClose }) {
             </div>
           )}
         </div>
+        )}
 
         <div>
-          <label className="form-label">Foreman</label>
+          <label className="form-label">{snow ? 'Plow driver' : 'Foreman'}</label>
           <select className="form-input" value={techId} onChange={e => setTechId(e.target.value)} required>
-            <option value="">Choose a foreman…</option>
+            <option value="">{snow ? 'Choose a plow…' : 'Choose a foreman…'}</option>
             {foremen.map(t => (
               <option key={t.id} value={t.id}>{t.name}{t.truckName ? ` · ${t.truckName}` : ''}</option>
             ))}
@@ -139,7 +159,7 @@ function QuoteCard({ job, onAdd, onDecline }) {
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{quote ? formatPrice(quote.estimate) : '—'}</div>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(quote.estimate)) : '—'}</div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(quote.totalSqFt)} · quoted ${timeAgo(job.createdAt)}` : `Not measured · ${timeAgo(job.createdAt)}`}</div>
         </div>
       </div>

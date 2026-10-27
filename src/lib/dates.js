@@ -29,9 +29,9 @@ export function repeatLabel(days) {
 }
 
 // 'Today', 'Tomorrow', 'Overdue', or the formatted day
-export function relativeDay(dateString) {
+// today can be overridden (the owner demo runs on its own calendar).
+export function relativeDay(dateString, today = todayString()) {
   if (!dateString) return 'Today';
-  const today = todayString();
   if (dateString === today) return 'Today';
   if (dateString === addDays(today, 1)) return 'Tomorrow';
   if (dateString < today) return `Overdue · ${formatDay(dateString)}`;

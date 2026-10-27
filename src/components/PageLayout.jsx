@@ -25,6 +25,12 @@ export default function PageLayout({ page, setPage, children }) {
   return (
     <div className="app-layout">
       <Sidebar page={page} setPage={setPage} />
+      {/* Staff sign-in, always visible at the top (signed in → back to your hub). */}
+      {page !== 'login' && (
+        <button type="button" className="top-login" onClick={() => { setPage(role || 'login'); window.scrollTo(0, 0); }}>
+          {role ? 'Owner Hub →' : '🔑 Log in'}
+        </button>
+      )}
       <main className="app-content">
         {children}
       </main>

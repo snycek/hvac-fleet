@@ -719,3 +719,7 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 @media (prefers-reduced-motion: reduce) { .panel-flash { animation-duration: 0.01s; } }
 
 .mark-all-btn { color: #3fb950 !important; border-color: #3fb95055 !important; }
+
+/* Log in button: top right of every public page */
+.top-login { position: fixed; top: 12px; right: 16px; z-index: 201; background: var(--bg-surface, #161b22); color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 700; cursor: pointer; box-shadow: 0 2px 10px #0006; }
+.top-login:hover { border-color: var(--accent-teal); color: var(--accent-teal); }

@@ -68,7 +68,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, today = todayString(), bare = false }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, today = todayString(), bare = false }) {
   const [paying, setPaying] = useState(null);
   const [showAllUnpaid, setShowAllUnpaid] = useState(false);
   const UNPAID_PREVIEW = 5;
@@ -169,6 +169,9 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   <span style={{ color: late ? '#f0b429' : 'var(--text-muted)', width: '84px', whiteSpace: 'nowrap', fontWeight: late ? 700 : 400 }} title={`Cut ${shortDate(job.completedAt)}`}>✂️ {shortDate(job.completedAt)} · {days}d</span>
                   <span style={{ fontWeight: 700, width: '70px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
                   <span className="row-actions">
+                  {printInvoice && (
+                    <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(job)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${job.clientName}`}>🖨</button>
+                  )}
                   {remindCustomer && (
                     <button type="button" className="btn-ghost remind-btn" disabled={reminding === job.id} onClick={() => remind(job)}
                       title={`Send ${job.clientName.split(' ')[0]} a payment reminder`}>

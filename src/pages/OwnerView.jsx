@@ -16,6 +16,8 @@ import TruckRoutes from '../components/TruckRoutes.jsx';
 import ActivityFeed from '../components/ActivityFeed.jsx';
 import CollapseButton from '../components/CollapseButton.jsx';
 import PayrollView from '../components/PayrollView.jsx';
+import PrintInvoices from '../components/PrintInvoices.jsx';
+import { demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
 import { formatDay, todayString } from '../lib/dates.js';
 import { hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
@@ -77,6 +79,8 @@ export default function OwnerView() {
   const [leftTab, setLeftTab] = useState('todo');
   const [view, setView] = useState('hub'); // 'hub' | 'payroll'
   const [selectedTechId, setSelectedTechId] = useState(null);
+  const [printing, setPrinting] = useState(null); // { title, items } for the invoice preview
+  const [printMenu, setPrintMenu] = useState(false);
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const toggle = id => setCollapsed(c => {
     const next = { ...c, [id]: !c[id] };
@@ -117,6 +121,35 @@ export default function OwnerView() {
     () => (demoOn ? technicians.map((t, i) => ({ ...t, location: sim.positions[i] })).filter(t => t.status !== 'offline') : technicians),
     [demoOn, technicians, sim.positions],
   );
+
+  // Paper invoices: one per visit, each with a QR that opens the customer's account.
+  // Live: the server signs each customer's link. Demo: the link carries the account itself.
+  const printInvoices = async (visitJobs, title) => {
+    setPrintMenu(false);
+    const crewOf = j => { const t = technicians.find(x => x.id === j.assignedTo); return t ? `${t.name}${t.truckName ? ` · ${t.truckName}` : ''}` : ''; };
+    let items;
+    if (demoOn) {
+      items = visitJobs.map(j => {
+        const invoice = invoiceFor(allJobs, j, today);
+        const open = [...invoice.previous, ...(invoice.current.paid ? [] : [invoice.current])];
+        const hash = demoAccountHash({ customer: invoice.customer, open, asOf: today });
+        return { key: j.id, invoice, crew: crewOf(j), payUrl: `${window.location.origin}/pay/demo#${hash}` };
+      });
+    } else {
+      const res = await fetch('/api/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobIds: visitJobs.map(j => j.id) }) });
+      const data = res.ok ? await res.json() : [];
+      items = data.map(d => {
+        const j = visitJobs.find(x => x.id === d.jobId);
+        return { key: d.jobId, invoice: d.invoice, crew: crewOf(j), payUrl: `${window.location.origin}/pay/${d.token}` };
+      });
+    }
+    setPrinting({ title, items });
+  };
+  // Today's visits for one truck (route order) or every truck.
+  const todaysVisits = techId => jobs
+    .filter(j => jobDay(j, today) === today && j.status !== 'quote' && (!techId || j.assignedTo === techId))
+    .sort((a, b) => String(a.assignedTo).localeCompare(String(b.assignedTo)));
+  const routeTechs = technicians.filter(t => t.status !== 'pending_approval' && jobs.some(j => j.assignedTo === t.id && jobDay(j, today) === today));
 
   const toggleDemo = () => {
     if (demoOn) sim.pause();
@@ -242,6 +275,7 @@ export default function OwnerView() {
         </div>
       )}
 
+      {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
       {view === 'payroll' ? (
         <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
       ) : (
@@ -264,6 +298,12 @@ export default function OwnerView() {
                   scheduleJob={scheduleJob} declineJob={declineJob} markPaid={markPaid}
                   logExpense={logExpense} rejectExpense={rejectExpense}
                   remindCustomer={remindCustomer} today={today}
+                  // From Unpaid: print off their latest unpaid cut so every older one shows as balance.
+                  printInvoice={job => {
+                    const latest = allJobs.filter(j => lawnKey(j) === lawnKey(job) && j.status === 'completed' && !j.paid)
+                      .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)))[0] || job;
+                    printInvoices([latest], `Invoice · ${job.clientName}`);
+                  }}
                 />
               ) : (
                 <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} />
@@ -279,6 +319,21 @@ export default function OwnerView() {
               <CollapseButton collapsed={collapsed.routes} onToggle={() => toggle('routes')} label="Routes" />
               <span className="dash-panel-title">🚜 Routes today</span>
               <span className="dash-head-note">{stats.cutToday}/{stats.totalToday} cut · {stats.leftToday} left · {money(stats.billedToday)}</span>
+              {!collapsed.routes && (
+                <span className="print-menu">
+                  <button type="button" className="btn-ghost head-btn" onClick={() => setPrintMenu(m => !m)} aria-expanded={printMenu} title="Print today's paper invoices to leave at each door">🖨 Invoices</button>
+                  {printMenu && (
+                    <span className="print-menu-list" role="menu">
+                      <button type="button" role="menuitem" onClick={() => printInvoices(todaysVisits(), `Today's invoices · all trucks`)}>All trucks ({todaysVisits().length})</button>
+                      {routeTechs.map(t => (
+                        <button key={t.id} type="button" role="menuitem" onClick={() => printInvoices(todaysVisits(t.id), `Today's invoices · ${t.truckName || t.name}`)}>
+                          {t.truckName || 'Truck'} · {t.name.split(' ')[0]} ({todaysVisits(t.id).length})
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </span>
+              )}
             </div>
             {!collapsed.routes && <div className="dash-panel-body">
               <TruckRoutes jobs={jobs} technicians={demoOn ? technicians.filter(t => t.status !== 'offline') : technicians} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} />

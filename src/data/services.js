@@ -83,6 +83,8 @@ export const COMPANY_INFO = {
   email: 'service@johnslawn.com',
   address: 'Serving Downriver Michigan & Surrounding Areas',
   hours: 'Mon–Sat, 7am–7pm · Plows run 24/7 when it snows',
+  // Where customers mail checks (printed on invoices). Leave null until John confirms it.
+  mailingAddress: null,
   established: 2024,
   credentials: ['Licensed & Insured', 'Locally Owned & Operated', 'Commercial-Grade Equipment', 'Satisfaction Guaranteed'],
   serviceAreas: ['Wyandotte', 'Downriver', 'Taylor', 'Trenton', 'Southgate', 'Allen Park', 'Lincoln Park', 'Riverview', 'Dearborn', 'Dearborn Heights'],

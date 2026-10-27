@@ -10,6 +10,9 @@ import { mockJobs } from './src/data/mockData.js';
 import { mockTechnicians } from './src/data/mockData.js';
 import { suggestAddresses } from './src/lib/addressSuggest.js';
 import { applyPaymentResult, simulateCardCharge, voidPayment } from './src/lib/payments.js';
+import { accountFor, invoiceFor } from './src/lib/invoices.js';
+import { lawnKey } from './src/lib/lawns.js';
+import crypto from 'crypto';
 
 // Load .env manually for ESM
 try {
@@ -804,6 +807,65 @@ app.put('/api/technicians/:id/location', (req, res) => {
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+// ---- Customer accounts: the QR on each paper invoice opens the customer's account ----
+// The link carries the customer (their service address) plus a signature, so it works
+// without a password and can't be edited to open someone else's account.
+// Set PORTAL_SECRET in production so links stay valid across restarts.
+const PORTAL_SECRET = process.env.PORTAL_SECRET || 'dev-only-portal-secret';
+if (!process.env.PORTAL_SECRET) console.warn('PORTAL_SECRET not set — using a dev-only secret for customer links');
+const b64url = (buf) => Buffer.from(buf).toString('base64url');
+const sign = (key) => crypto.createHmac('sha256', PORTAL_SECRET).update(key).digest('base64url').slice(0, 22);
+const portalToken = (key) => `${b64url(key)}.${sign(key)}`;
+function readToken(token) {
+  const [body, sig] = String(token || '').split('.');
+  if (!body || !sig) return null;
+  let key;
+  try { key = Buffer.from(body, 'base64url').toString('utf8'); } catch { return null; }
+  const want = sign(key);
+  if (sig.length !== want.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  return key;
+}
+const jobForKey = (key) => jobs.filter((j) => lawnKey(j) === key).sort((a, b) => String(b.completedAt || b.scheduledDate || '').localeCompare(String(a.completedAt || a.scheduledDate || '')))[0];
+
+// Owner (printing invoices): the paper for each visit + its customer's account link.
+app.post('/api/invoices', (req, res) => {
+  const ids = Array.isArray(req.body?.jobIds) ? req.body.jobIds.slice(0, 200) : [];
+  const out = ids.map((id) => jobs.find((j) => j.id === id)).filter(Boolean).map((job) => ({
+    jobId: job.id,
+    token: portalToken(lawnKey(job)),
+    invoice: invoiceFor(jobs, job),
+  }));
+  res.json(out);
+});
+
+// Customer: their account (open invoices, recent payments).
+app.get('/api/portal/:token', (req, res) => {
+  const key = readToken(req.params.token);
+  const job = key && jobForKey(key);
+  if (!job) return res.status(404).json({ error: "We couldn't find that account. Call us and we'll sort it out." });
+  res.json({ ...accountFor(jobs, job), company: 'johns' });
+});
+
+// Customer pays open invoices by card (test processor for now — only the last 4 digits
+// ever reach the server). Result goes through the same handler as every other payment.
+app.post('/api/portal/:token/pay', (req, res) => {
+  const key = readToken(req.params.token);
+  const job = key && jobForKey(key);
+  if (!job) return res.status(404).json({ error: "We couldn't find that account." });
+  const open = accountFor(jobs, job).open;
+  const wanted = Array.isArray(req.body?.jobIds) ? req.body.jobIds : open.map((l) => l.id);
+  const lines = open.filter((l) => wanted.includes(l.id));
+  if (!lines.length) return res.status(400).json({ error: 'Nothing to pay — you are all caught up.' });
+  const last4 = String(req.body?.last4 || '').replace(/\D/g, '').slice(-4);
+  if (last4.length !== 4) return res.status(400).json({ error: 'Enter your card number.' });
+  const amount = lines.reduce((s, l) => s + l.amount, 0);
+  const result = simulateCardCharge({ jobIds: lines.map((l) => l.id), amount, last4 });
+  const next = applyPaymentResult({ jobs, payments, expenses }, result);
+  commitBooks(next);
+  if (result.status !== 'succeeded') return res.status(402).json({ error: `${result.brand} ••${result.last4} was declined: ${result.reason}. Try another card.`, payment: next.payment });
+  res.json({ payment: next.payment, account: accountFor(jobs, job) });
+});
 
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));

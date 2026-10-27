@@ -13,11 +13,15 @@ import TechnicianView from './pages/TechnicianView.jsx';
 import ManagerView from './pages/ManagerView.jsx';
 import OwnerView from './pages/OwnerView.jsx';
 import QuoteTool from './pages/QuoteTool.jsx';
+import CustomerPortal from './pages/CustomerPortal.jsx';
 import { SERVICE_PAGE_IDS } from './data/services.js';
 
 function AppInner() {
   const [page, setPage] = useState('home');
   const { role } = useApp();
+
+  // Scanned the QR on a paper invoice: straight to their account, no site chrome.
+  if (window.location.pathname.startsWith('/pay')) return <CustomerPortal />;
 
   const renderPage = () => {
     // Dashboard views (keep existing behavior)

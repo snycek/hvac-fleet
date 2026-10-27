@@ -494,3 +494,90 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   background-size: 200px 180px; background-color: rgba(200, 220, 240, 0.12); animation: snowfall 6s linear infinite; }
 @keyframes snowfall { from { background-position: 0 0; } to { background-position: 40px 180px; } }
 @media (prefers-reduced-motion: reduce) { .snowfall { animation: none; } }
+
+/* ---------- Paper invoices (preview on screen, one per page when printed) ---------- */
+.print-menu { position: relative; margin-left: auto; }
+.head-btn { padding: 3px 9px; font-size: 12px; }
+.print-menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 1200; display: flex; flex-direction: column; min-width: 200px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px #0008; }
+.print-menu-list button { background: none; border: none; color: var(--text-primary); text-align: left; padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.print-menu-list button:hover { background: var(--bg-primary); }
+.print-root { position: fixed; inset: 0; z-index: 3000; background: #0b0f14ee; overflow: auto; }
+.print-toolbar { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 16px; background: var(--bg-secondary, #161b22); border-bottom: 1px solid var(--border); color: var(--text-primary); font-size: 14px; }
+.print-toolbar span { color: var(--text-muted); font-size: 13px; }
+.print-pages { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 16px 60px; }
+.print-empty { color: var(--text-muted); padding: 40px; }
+.invoice-sheet { width: 8.5in; min-height: 11in; max-width: 100%; box-sizing: border-box; padding: 0.45in 0.55in; background: #fff; color: #1b1f24; font-family: Georgia, 'Times New Roman', serif; font-size: 12.5px; line-height: 1.4; box-shadow: 0 6px 30px #0006; display: flex; flex-direction: column; gap: 13px; overflow: hidden; }
+.invoice-sheet * { color: inherit; }
+.inv-head { display: flex; justify-content: space-between; gap: 24px; border-bottom: 3px solid #2d8c3a; padding-bottom: 14px; }
+.inv-brand { font-family: system-ui, sans-serif; font-weight: 800; font-size: 22px; color: #1f6b2b; }
+.inv-tag { font-style: italic; color: #4b5563; margin-bottom: 6px; }
+.inv-contact { font-size: 12px; color: #374151; }
+.inv-meta { text-align: right; }
+.inv-title { font-family: system-ui, sans-serif; font-weight: 800; font-size: 26px; letter-spacing: 3px; color: #1f6b2b; }
+.inv-meta table { margin-left: auto; border-collapse: collapse; font-size: 12px; }
+.inv-meta th { text-align: left; font-weight: 400; color: #6b7280; padding: 1px 10px 1px 0; }
+.inv-meta td { text-align: right; font-family: ui-monospace, monospace; }
+.inv-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.inv-label { font-family: system-ui, sans-serif; text-transform: uppercase; letter-spacing: 1px; font-size: 10.5px; font-weight: 700; color: #6b7280; margin-bottom: 3px; }
+.inv-strong { font-weight: 700; font-size: 14px; }
+.inv-lines { width: 100%; border-collapse: collapse; }
+.inv-lines th { font-family: system-ui, sans-serif; text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.8px; color: #6b7280; border-bottom: 1.5px solid #1b1f24; padding: 6px 4px; }
+.inv-lines td { padding: 5px 4px; border-bottom: 1px solid #e5e7eb; }
+.inv-lines td:nth-child(3) { font-family: ui-monospace, monospace; font-size: 11px; color: #4b5563; }
+.inv-lines .num { text-align: right; white-space: nowrap; }
+.inv-sub td { font-family: system-ui, sans-serif; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.8px; color: #6b7280; padding-top: 12px; }
+.inv-pastdue { color: #b42318; font-weight: 700; font-family: system-ui, sans-serif; font-size: 11px; }
+.inv-totals { margin-left: auto; width: 270px; display: flex; flex-direction: column; gap: 4px; }
+.inv-totals div { display: flex; justify-content: space-between; }
+.inv-total { border-top: 2px solid #1b1f24; padding-top: 6px; margin-top: 2px; font-family: system-ui, sans-serif; font-weight: 800; font-size: 19px; }
+.inv-pay { display: flex; gap: 20px; align-items: center; border: 2px solid #2d8c3a; border-radius: 10px; padding: 14px 16px; }
+.inv-qr img, .inv-qr-wait { width: 1.6in; height: 1.6in; display: block; }
+.inv-qr-wait { display: flex; align-items: center; justify-content: center; background: #f3f4f6; color: #9ca3af; }
+.inv-pay-title { font-family: system-ui, sans-serif; font-weight: 800; font-size: 20px; color: #1f6b2b; margin-bottom: 4px; }
+.inv-pay-text p { margin: 0 0 6px; }
+.inv-other { font-size: 11.5px; color: #374151; }
+.inv-notes { margin-top: auto; }
+.inv-line { border-bottom: 1px solid #9ca3af; height: 24px; }
+.inv-foot { text-align: center; font-size: 11.5px; color: #4b5563; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+@page { size: letter; margin: 0; }
+@media print {
+  body > *:not(.print-root) { display: none !important; }
+  body { background: #fff !important; }
+  .print-root { position: static; inset: auto; background: none; overflow: visible; }
+  .print-toolbar { display: none !important; }
+  .print-pages { display: block; padding: 0; }
+  .invoice-sheet { box-shadow: none; width: 8.5in; height: 11in; min-height: 0; break-after: page; page-break-after: always; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .invoice-sheet:last-child { break-after: auto; page-break-after: auto; }
+}
+
+/* ---------- Customer account page (opened from the invoice QR, phone first) ---------- */
+.portal { min-height: 100vh; background: #f4f7f4; color: #1b1f24; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+.portal-top { background: #1f6b2b; color: #fff; font-weight: 800; font-size: 17px; padding: 14px 16px; }
+.portal-main { max-width: 520px; margin: 0 auto; padding: 18px 16px 40px; display: flex; flex-direction: column; gap: 14px; }
+.portal-hello { font-size: 24px; font-weight: 800; }
+.portal-muted { color: #5b6470; }
+.portal-small { display: block; font-size: 12px; }
+.portal-card { background: #fff; border: 1px solid #e3e8e3; border-radius: 14px; padding: 16px; box-shadow: 0 1px 3px #0000000d; }
+.portal-label { text-transform: uppercase; letter-spacing: 1px; font-size: 11.5px; font-weight: 700; color: #5b6470; }
+.portal-amount { font-size: 34px; font-weight: 800; margin: 2px 0 6px; }
+.portal-big { font-size: 18px; font-weight: 800; color: #1f6b2b; }
+.portal-receipt { border-color: #8fd19e; background: #f0fbf2; }
+.portal-good { color: #1f6b2b; font-weight: 600; }
+.portal-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.portal-list li { border-top: 1px solid #eef1ee; }
+.portal-list label { display: flex; align-items: center; gap: 10px; padding: 10px 0; cursor: pointer; }
+.portal-list input { width: 20px; height: 20px; accent-color: #1f6b2b; }
+.portal-line { flex: 1; min-width: 0; font-size: 14.5px; }
+.portal-line-amt { font-weight: 700; }
+.portal-pastdue { color: #b42318; font-weight: 700; }
+.portal-plain { margin: 6px 0 0; padding-left: 18px; font-size: 14px; line-height: 1.8; }
+.portal-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; border-top: 1px solid #eef1ee; padding-top: 12px; }
+.portal-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; color: #3b434c; flex: 1; min-width: 0; }
+.portal-form input { font-size: 16px; padding: 11px 12px; border: 1px solid #cfd6cf; border-radius: 10px; background: #fff; color: #1b1f24; width: 100%; box-sizing: border-box; }
+.portal-row { display: flex; gap: 8px; }
+.portal-test { font-size: 12.5px; background: #fff8e1; border: 1px solid #f3d27a; color: #6b5200; border-radius: 8px; padding: 8px 10px; }
+.portal-error { color: #b42318; font-size: 14px; font-weight: 600; }
+.portal-pay { background: #1f6b2b; color: #fff; border: none; border-radius: 12px; padding: 15px; font-size: 17px; font-weight: 800; cursor: pointer; }
+.portal-pay:disabled { opacity: 0.6; }
+.portal-contact { text-align: center; color: #5b6470; font-size: 14px; }
+.portal-contact a { color: #1f6b2b; font-weight: 700; }

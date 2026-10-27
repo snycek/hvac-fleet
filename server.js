@@ -13,6 +13,7 @@ import { applyPaymentResult, simulateCardCharge, voidPayment } from './src/lib/p
 import { accountFor, invoiceFor } from './src/lib/invoices.js';
 import { lawnKey } from './src/lib/lawns.js';
 import crypto from 'crypto';
+import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
 
 // Load .env manually for ESM
 try {
@@ -63,6 +64,54 @@ app.use(cors({
 }));
 // Receipt photos come in as base64 images, so allow larger bodies.
 app.use(express.json({ limit: '8mb' }));
+
+// ---- Sign-in: owner screens and data need a signed-in John's account ----
+// Public: the website's quote form, address lookups, careers form, health check, and
+// customers' own signed pay links. Everything else needs a Firebase sign-in token.
+initFirebase();
+const PUBLIC_API = [
+  ['POST', /^\/api\/contact$/],
+  ['GET', /^\/api\/geocode/],
+  ['GET', /^\/api\/address-suggest/],
+  ['POST', /^\/api\/technicians\/apply$/],
+  ['GET', /^\/api\/health$/],
+  ['*', /^\/api\/portal\//],
+];
+const isPublic = (req) => PUBLIC_API.some(([m, re]) => (m === '*' || m === req.method) && re.test(req.path));
+app.use('/api', async (req, res, next) => {
+  if (isPublic({ method: req.method, path: req.originalUrl.split('?')[0] })) return next();
+  if (!firebaseReady()) {
+    // Never run open in production; local dev without a key stays open for testing.
+    if (process.env.NODE_ENV === 'production') return res.status(503).json({ error: 'Sign-in is not set up on the server yet.' });
+    return next();
+  }
+  const m = (req.get('authorization') || '').match(/^Bearer (.+)$/);
+  if (!m) return res.status(401).json({ error: 'Please sign in.' });
+  try {
+    const u = await verifyUser(m[1]);
+    // Staff accounts are the IDs the owner adds ("owner" → owner@johnslawn.app). Anyone else who
+    // manages to make a Firebase account (Google sign-in, etc.) gets nothing.
+    if (!/@johnslawn\.app$/i.test(u.email)) return res.status(403).json({ error: "This account is not a John's Lawn staff account." });
+    // Every account in John's Firebase project is staff (sign-up is turned off, so
+    // only accounts the owner adds exist). The ID before the @ is the username.
+    req.user = { ...u, id: u.email.split('@')[0], role: 'owner' };
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Your sign-in expired. Please sign in again.' });
+  }
+});
+
+// Anything that changes data gets saved to Firebase right after the response.
+app.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 400) scheduleSave(); });
+  next();
+});
+
+// Who's signed in (the app asks after Firebase sign-in).
+app.get('/api/me', (req, res) => {
+  if (!req.user) return res.status(firebaseReady() ? 401 : 200).json(firebaseReady() ? { error: 'Please sign in.' } : { id: 'dev', role: 'owner', dev: true });
+  res.json({ id: req.user.id, email: req.user.email, role: req.user.role });
+});
 
 const jobs = mockJobs.map((job) => ({ ...job }));
 const technicians = mockTechnicians.map((tech) => ({ ...tech }));
@@ -907,5 +956,9 @@ if (fs.existsSync(distPath)) {
   });
 }
 
+// Load saved data from Firebase before taking requests; first run seeds the database.
+await loadAll({ jobs, technicians, expenses, payments, delays, employees, shifts }, { payroll });
+await saveNow();
+
 const PORT = process.env.PORT || 3002;
-app.listen(PORT, () => console.log(`Server listening on :${PORT}`));
+app.listen(PORT, () => console.log(`Server listening on :${PORT}${firebaseReady() ? ' (Firebase on)' : ' (no Firebase key — data in memory only)'}`));

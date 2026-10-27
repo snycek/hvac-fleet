@@ -1,199 +1,78 @@
+import { useEffect, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
-import { useTechnicians } from '../hooks/useTechnicians.js';
-import { useState } from 'react';
+import { AUTH_ENABLED } from '../lib/firebase.js';
 
-const DEMO_ROLES = [
-  {
-    role: 'technician',
-    techId: 'tech-001',
-    icon: '🔧',
-    title: 'Foreman',
-    desc: 'See your cuts for today, navigate there, mark yards cut',
-    color: '#0fd3c3',
-  },
-  {
-    role: 'manager',
-    icon: '📋',
-    title: 'Manager',
-    desc: 'Assign jobs to foremen and approve new crew',
-    color: '#1f6feb',
-  },
-  {
-    role: 'owner',
-    icon: '📊',
-    title: 'Owner',
-    desc: 'Live fleet map, technician status, earnings reports',
-    color: '#9c55f7',
-  },
-];
+// Friendly words for Firebase sign-in errors.
+const MESSAGES = {
+  'auth/invalid-credential': 'That ID and password don\'t match.',
+  'auth/wrong-password': 'That ID and password don\'t match.',
+  'auth/user-not-found': 'That ID and password don\'t match.',
+  'auth/invalid-email': 'Enter your ID, like "owner".',
+  'auth/too-many-requests': 'Too many tries. Wait a few minutes and try again.',
+  'auth/user-disabled': 'This account is turned off. Ask the owner.',
+  'auth/network-request-failed': 'No connection. Check your internet and try again.',
+};
 
+/** Staff sign-in (real Firebase accounts). */
 export default function Login({ setPage }) {
-  const { loginDemo, verifyDemoCredentials } = useApp();
-  const { technicians } = useTechnicians();
-  const selectableTechs = technicians.filter(t => t.status !== 'pending_approval');
-  const [selectedTechId, setSelectedTechId] = useState('tech-001');
-  const [username, setUsername] = useState('');
+  const { signIn, role, authReady, loginDemo } = useApp();
+  const [id, setId] = useState('');
   const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [credentialsVerified, setCredentialsVerified] = useState(false);
+  const [state, setState] = useState({ busy: false, error: '' });
 
-  const handleVerifyCredentials = () => {
-    const isValid = verifyDemoCredentials(username.trim(), password);
-    if (!isValid) {
-      setCredentialsVerified(false);
-      setAuthError('Invalid credentials. Please try again.');
-      return;
+  // Once signed in (and the server confirms the role), go to that screen.
+  useEffect(() => {
+    if (role) setPage(role);
+  }, [role, setPage]);
+
+  const submit = async e => {
+    e.preventDefault();
+    if (!id.trim() || !password) { setState({ busy: false, error: 'Enter your ID and password.' }); return; }
+    setState({ busy: true, error: '' });
+    try {
+      await signIn(id, password);
+      // The app picks up the sign-in and moves on (see the effect above).
+    } catch (err) {
+      setState({ busy: false, error: MESSAGES[err.code] || 'Could not sign in. Try again.' });
     }
-
-    setCredentialsVerified(true);
-    setAuthError('');
-  };
-
-  const handleDemo = (role, techId) => {
-    if (!credentialsVerified) {
-      setAuthError('Please submit valid credentials before selecting a role.');
-      return;
-    }
-
-    const resolvedTechId = role === 'technician' ? (techId || selectedTechId) : null;
-    const selectedTech = role === 'technician' ? selectableTechs.find(t => t.id === resolvedTechId) : null;
-    loginDemo(role, resolvedTechId, selectedTech?.name || null);
-    setPage(role);
   };
 
   return (
-    <div style={{
-      minHeight: 'calc(100vh - 56px)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '40px 24px',
-    }}>
-      <div style={{ maxWidth: '600px', width: '100%', textAlign: 'center' }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px' }}>🌱</div>
-        <h1 style={{ fontSize: '30px', fontWeight: 700, marginBottom: '10px' }}>John's Lawn Portal</h1>
-        <p style={{ color: 'var(--text-muted)', marginBottom: '40px', fontSize: '15px' }}>
-          Enter your credentials, then select a role to enter the portal.
-        </p>
+    <div style={{ minHeight: 'calc(100vh - 56px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px' }}>
+      <div style={{ maxWidth: '420px', width: '100%', textAlign: 'center' }}>
+        <div style={{ fontSize: '48px', marginBottom: '12px' }}>🌱</div>
+        <h1 style={{ fontSize: '28px', fontWeight: 700, marginBottom: '8px' }}>John's Lawn Portal</h1>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '28px', fontSize: '15px' }}>Sign in with your staff ID.</p>
 
-        <div className="card" style={{ marginBottom: '16px', padding: '14px 16px', textAlign: 'left' }}>
-          <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Username</label>
-          <input
-            className="form-input"
-            type="text"
-            value={username}
-            onChange={e => {
-              setUsername(e.target.value);
-              setCredentialsVerified(false);
-              if (authError) setAuthError('');
-            }}
-            autoComplete="username"
-          />
-
-          <label className="form-label" style={{ marginBottom: '6px', display: 'block', marginTop: '12px' }}>Password</label>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-            <input
-              className="form-input"
-              type="password"
-              value={password}
-              onChange={e => {
-                setPassword(e.target.value);
-                setCredentialsVerified(false);
-                if (authError) setAuthError('');
-              }}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleVerifyCredentials();
-                }
-              }}
-              autoComplete="current-password"
-              style={{ flex: 1 }}
-            />
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={handleVerifyCredentials}
-              style={{ whiteSpace: 'nowrap', height: '40px', padding: '0 14px' }}
-            >
-              Submit
+        {AUTH_ENABLED ? (
+          <form className="card" onSubmit={submit} style={{ padding: '20px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label className="form-label" htmlFor="login-id">ID</label>
+              <input id="login-id" className="form-input" value={id} onChange={e => setId(e.target.value)} placeholder="owner" autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+            </div>
+            <div>
+              <label className="form-label" htmlFor="login-pw">Password</label>
+              <input id="login-pw" className="form-input" type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+            </div>
+            {state.error && <div role="alert" style={{ color: '#f85149', fontSize: '13px' }}>{state.error}</div>}
+            <button type="submit" className="btn-primary" disabled={state.busy || !authReady} style={{ padding: '12px', fontSize: '15px' }}>
+              {state.busy ? 'Signing in…' : 'Sign in'}
             </button>
-          </div>
-
-          {authError && (
-            <p style={{ marginTop: '10px', color: '#f85149', fontSize: '12px' }}>{authError}</p>
-          )}
-          {credentialsVerified && (
-            <p style={{ marginTop: '10px', color: '#3fb950', fontSize: '12px' }}>Credentials verified. Choose a role below.</p>
-          )}
-        </div>
-
-        <div className="card" style={{ marginBottom: '16px', padding: '14px 16px', textAlign: 'left' }}>
-          <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>Foreman Login Profile</label>
-          <select className="form-input" value={selectedTechId} onChange={e => setSelectedTechId(e.target.value)}>
-            {(selectableTechs.length ? selectableTechs : [{ id: 'tech-001', name: 'Marcus Williams' }]).map(tech => (
-              <option key={tech.id} value={tech.id}>{tech.name}</option>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center' }}>Forgot your password? Ask the owner to reset it.</div>
+          </form>
+        ) : import.meta.env.DEV ? (
+          // Local testing without Firebase set up: pick a screen (never in the live build).
+          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Sign-in isn't set up on this computer. Local testing only:</div>
+            {[['owner', '📊 Owner'], ['technician', '🔧 Foreman'], ['manager', '📋 Manager']].map(([r, label]) => (
+              <button key={r} type="button" className="btn-ghost" onClick={() => { loginDemo(r); setPage(r); }}>{label}</button>
             ))}
-          </select>
-        </div>
+          </div>
+        ) : (
+          <div className="card" style={{ padding: '18px', color: 'var(--text-muted)' }}>Sign-in isn't available right now.</div>
+        )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {DEMO_ROLES.map(({ role, techId, icon, title, desc, color }) => (
-            <button
-              key={role}
-              onClick={() => handleDemo(role, role === 'technician' ? selectedTechId : techId)}
-              disabled={!credentialsVerified}
-              style={{
-                background: 'var(--bg-elevated)',
-                border: `2px solid ${color}44`,
-                borderRadius: '12px',
-                padding: '20px 24px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '20px',
-                cursor: credentialsVerified ? 'pointer' : 'not-allowed',
-                textAlign: 'left',
-                transition: 'border-color 0.2s, background 0.2s',
-                width: '100%',
-                opacity: credentialsVerified ? 1 : 0.55,
-              }}
-              onMouseEnter={e => {
-                if (!credentialsVerified) return;
-                e.currentTarget.style.borderColor = color;
-                e.currentTarget.style.background = color + '11';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = color + '44';
-                e.currentTarget.style.background = 'var(--bg-elevated)';
-              }}
-            >
-              <div style={{
-                width: '52px', height: '52px', borderRadius: '50%',
-                background: color + '22', border: `2px solid ${color}55`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '24px', flexShrink: 0,
-              }}>
-                {icon}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: '17px', color: color, marginBottom: '4px' }}>
-                  Demo as {title}
-                </div>
-                <div style={{ fontSize: '13px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                  {desc}
-                </div>
-              </div>
-              <div style={{ color: color, fontSize: '20px', flexShrink: 0 }}>→</div>
-            </button>
-          ))}
-        </div>
-
-        <p style={{ marginTop: '32px', fontSize: '13px', color: 'var(--text-muted)' }}>
-          <button className="btn-ghost" onClick={() => setPage('landing')} style={{ fontSize: '13px' }}>
-            ← Back to Home
-          </button>
-        </p>
+        <button type="button" className="btn-ghost" onClick={() => setPage('home')} style={{ marginTop: '20px', fontSize: '13px' }}>← Back to home</button>
       </div>
     </div>
   );

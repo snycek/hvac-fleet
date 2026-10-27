@@ -1,0 +1,6 @@
+# Never upload secrets with the code (Railway has them as settings)
+.env
+.env.*
+service-account*.json
+*-firebase-adminsdk-*.json
+node_modules

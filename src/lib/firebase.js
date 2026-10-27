@@ -1,7 +1,8 @@
 import { initializeApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
-import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getAuth } from 'firebase/auth';
 
+// Firebase is used for SIGN-IN only. All data goes through the app's server, which checks
+// the signed-in user (the database rules block the browser from reading it directly).
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -11,19 +12,24 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-export let db   = null;
 export let auth = null;
-export let googleProvider = null;
-export let FIREBASE_ENABLED = false;
+export let AUTH_ENABLED = false;
+
+// Old HVAC code paths read Firestore straight from the browser; keep them off — data
+// comes from the server API.
+export const FIREBASE_ENABLED = false;
+export const db = null;
 
 try {
   if (import.meta.env.VITE_FIREBASE_API_KEY) {
     const app = initializeApp(firebaseConfig);
-    db              = getFirestore(app);
-    auth            = getAuth(app);
-    googleProvider  = new GoogleAuthProvider();
-    FIREBASE_ENABLED = true;
+    auth = getAuth(app);
+    AUTH_ENABLED = true;
   }
 } catch (e) {
-  console.warn('Firebase init failed — running in demo mode:', e.message);
+  console.warn('Firebase sign-in could not start:', e.message);
 }
+
+// Staff sign in with a short ID ("owner"); Firebase stores it as an email on this domain.
+export const ID_DOMAIN = 'johnslawn.app';
+export const idToEmail = id => (String(id).includes('@') ? String(id).trim() : `${String(id).trim().toLowerCase()}@${ID_DOMAIN}`);

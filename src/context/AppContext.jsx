@@ -1,10 +1,9 @@
-import { createContext, useContext, useState, useCallback } from 'react';
-import { FIREBASE_ENABLED, db } from '../lib/firebase.js';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { AUTH_ENABLED, FIREBASE_ENABLED, auth, db, idToEmail } from '../lib/firebase.js';
 import { mockJobs } from '../data/mockData.js';
 
 const AppContext = createContext(null);
-const DEMO_USERNAME = 'youre';
-const DEMO_PASSWORD = 'doingawesome';
 
 export function AppProvider({ children }) {
   // Restore session from localStorage
@@ -15,8 +14,35 @@ export function AppProvider({ children }) {
     } catch { return null; }
   })();
 
-  const [user, setUser]   = useState(savedSession?.user || null);
-  const [role, setRole]   = useState(savedSession?.role || null);
+  // With real sign-in, who you are comes from Firebase — never from saved browser data.
+  const [user, setUser]   = useState(AUTH_ENABLED ? null : savedSession?.user || null);
+  const [role, setRole]   = useState(AUTH_ENABLED ? null : savedSession?.role || null);
+  const [authReady, setAuthReady] = useState(!AUTH_ENABLED);
+
+  // Signed in with Firebase → ask our server who that is (it checks the token).
+  useEffect(() => {
+    if (!AUTH_ENABLED) return undefined;
+    return onAuthStateChanged(auth, async fbUser => {
+      if (!fbUser) { setUser(null); setRole(null); setAuthReady(true); return; }
+      try {
+        const res = await fetch('/api/me');
+        const me = await res.json();
+        if (!res.ok) throw new Error(me.error || 'Not allowed');
+        setUser({ uid: fbUser.uid, displayName: me.id, email: me.email });
+        setRole(me.role);
+      } catch {
+        await signOut(auth);
+        setUser(null); setRole(null);
+      } finally {
+        setAuthReady(true);
+      }
+    });
+  }, []);
+
+  // Real sign-in: an ID like "owner" (or an email) and a password.
+  const signIn = async (id, password) => {
+    await signInWithEmailAndPassword(auth, idToEmail(id), password);
+  };
   const [activeTechId, setActiveTechId] = useState(savedSession?.activeTechId || null);
   const [jobs, setJobs] = useState(mockJobs.map(j => ({ ...j })));
 
@@ -30,7 +56,7 @@ export function AppProvider({ children }) {
     } catch {}
   };
 
-  const loginDemo = (selectedRole, techId = null, techDisplayName = null) => {
+  const loginDemo = (selectedRole, techId = null, techDisplayName = null, ownerName = null) => {
     setRole(selectedRole);
     const userData = {
       uid: `demo-${selectedRole}`,
@@ -38,7 +64,7 @@ export function AppProvider({ children }) {
         ? (techDisplayName || 'Marcus Williams')
         : selectedRole === 'manager'
           ? 'Alex Manager'
-          : 'Owner',
+          : (ownerName || 'Owner'),
     };
     setUser(userData);
     const finalTechId = selectedRole === 'technician' ? (techId || 'tech-001') : null;
@@ -46,11 +72,9 @@ export function AppProvider({ children }) {
     saveSession(userData, selectedRole, finalTechId);
   };
 
-  const verifyDemoCredentials = (username, password) => {
-    return username === DEMO_USERNAME && password === DEMO_PASSWORD;
-  };
 
   const logout = () => {
+    if (AUTH_ENABLED) signOut(auth).catch(() => {});
     setUser(null);
     setRole(null);
     setActiveTechId(null);
@@ -86,7 +110,7 @@ export function AppProvider({ children }) {
   }, []);
 
   return (
-    <AppContext.Provider value={{ user, setUser, role, setRole, demoMode, activeTechId, setActiveTechId, loginDemo, verifyDemoCredentials, logout, jobs, setJobs, createJob, updateJobStatus2, assignJob }}>
+    <AppContext.Provider value={{ user, setUser, role, setRole, demoMode, activeTechId, setActiveTechId, loginDemo, signIn, authReady, logout, jobs, setJobs, createJob, updateJobStatus2, assignJob }}>
       {children}
     </AppContext.Provider>
   );

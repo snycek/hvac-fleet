@@ -69,7 +69,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, today = todayString(), bare = false }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false }) {
   const [paying, setPaying] = useState(null);
   const [showAllUnpaid, setShowAllUnpaid] = useState(false);
   const UNPAID_PREVIEW = 5;
@@ -149,7 +149,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   };
   const unpaidTotal = unpaid.reduce((s, j) => s + (j.earnings || 0), 0);
   const unpaidAccounts = new Set(unpaid.map(lawnKey)).size;
-  const total = quotes.length + toLog.length + unpaidAccounts;
+  const total = (hideQuotes ? 0 : quotes.length) + toLog.length + unpaidAccounts;
 
 
   return (
@@ -165,7 +165,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
       </div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: bare ? '14px' : '22px' }}>
-        <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} />
+        {!hideQuotes && <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} />}
 
         {toLog.length > 0 && (
           <div>

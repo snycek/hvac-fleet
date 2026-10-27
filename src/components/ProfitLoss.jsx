@@ -3,6 +3,7 @@ import ExpenseModal from './ExpenseModal.jsx';
 import { receiptUrl } from '../hooks/useExpenses.js';
 import { METHODS } from '../lib/payments.js';
 import PeriodPicker from './PeriodPicker.jsx';
+import PLCalendar from './PLCalendar.jsx';
 import CollapseButton from './CollapseButton.jsx';
 import { expenseType, money, periodRange, profitAndLoss, shortDate, effectiveAnchor } from '../lib/lawns.js';
 import { todayString } from '../lib/dates.js';
@@ -28,6 +29,7 @@ function Stat({ label, value, color, compact }) {
 /** Profit & loss for a day, week, or month: paid cuts in, logged expenses out. */
 function ProfitLoss({ jobs, expenses, technicians, addExpense, today = todayString(), compact = false, collapsed = false, onToggleCollapse, payments = [] }) {
   const [period, setPeriod] = useState({ mode: 'month', anchor: today, pinned: false });
+  const [calendar, setCalendar] = useState(false); // month calendar view
   const [adding, setAdding] = useState(false);
   const pl = profitAndLoss(jobs, expenses, periodRange(period.mode, effectiveAnchor(period, today)));
 
@@ -53,6 +55,12 @@ function ProfitLoss({ jobs, expenses, technicians, addExpense, today = todayStri
         {compact && onToggleCollapse && <CollapseButton collapsed={collapsed} onToggle={onToggleCollapse} label="P/L" />}
         <h2 className={compact ? 'dash-panel-title' : undefined} style={compact ? undefined : { fontSize: '18px', fontWeight: 700, marginRight: 'auto' }}>📊 P/L</h2>
         {!collapsed && <PeriodPicker value={period} onChange={setPeriod} today={today} compact={compact} />}
+        {!collapsed && <button type="button" className="btn-ghost" onClick={() => setCalendar(true)} title="P/L calendar: each day's money in and out for the month" aria-label="Open P/L calendar" style={{ padding: compact ? '2px 7px' : '6px 10px' }}>📅</button>}
+        {calendar && (
+          <PLCalendar jobs={jobs} expenses={expenses} today={today} initial={effectiveAnchor(period, today)}
+            onClose={() => setCalendar(false)}
+            onPickDay={d => { setPeriod({ mode: 'day', anchor: d, pinned: d !== today }); setCalendar(false); }} />
+        )}
         {!collapsed && <button type="button" className="btn-primary" onClick={() => setAdding(true)} style={{ padding: compact ? '4px 10px' : '7px 14px', fontSize: compact ? '12px' : '13px' }}>+ Expense</button>}
       </div>
 

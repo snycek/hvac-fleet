@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import demo from '../data/demoAllenParkWeek.json';
 import plowData from '../data/demoPlowLots.json';
 import { addDays, todayString } from '../lib/dates.js';
+import { lawnKey } from '../lib/lawns.js';
+import { estimatePrice } from '../lib/zones.js';
+import { bestInsertion, rankRoutes } from '../lib/routeFit.js';
 import { applyPaymentResult, simulateCardCharge, voidPayment } from '../lib/payments.js';
 
 // Owner demo: two trucks working ZIP 48101 on a weekly cycle (Mon–Fri, 16 lawns
@@ -100,8 +103,50 @@ const PLOW_ROUTES = plowData.routes.map(r => ({
 // Vehicles in a world: lawn trucks first (truckCount of them), then the plows.
 const isPlow = (w, t) => t >= w.truckCount;
 const driverOf = (w, t) => (isPlow(w, t) ? PLOWS[t - w.truckCount] : FOREMEN[t]);
-const routeOf = (w, t) => (isPlow(w, t) ? PLOW_ROUTES[t - w.truckCount] : ROUTES[w.day][t]);
-const stopById = id => lawnById[id] || lotById[id];
+// Accepted quotes change a weekday route from a date on: custom[`${day}:${truck}`] =
+// [{ from, route }] (the latest one in effect wins). New lawns live in w.extraLawns.
+const routeFor = (custom, day, truck, date) => {
+  const list = custom?.[`${day}:${truck}`] || [];
+  for (let i = list.length - 1; i >= 0; i--) if (date >= list[i].from) return list[i].route;
+  return ROUTES[day][truck];
+};
+const routeOf = (w, t) => (isPlow(w, t) ? PLOW_ROUTES[t - w.truckCount] : routeFor(w.custom, w.day, t, addDays(w.weekStart, w.day)));
+const stopById = (id, w) => lawnById[id] || w?.extraLawns?.[id] || lotById[id];
+const DEPOT_PT = { lat: demo.depot.lat, lng: demo.depot.lng };
+
+// A straight-line leg (used until the real road path comes back).
+function straightLeg(a, b, to) {
+  const path = [[a.lat, a.lng], [b.lat, b.lng]];
+  const m = metersBetween(path[0], path[1]);
+  return { to, meters: Math.round(m), seconds: Math.round(m / 8), path, cum: [0, m], length: m, straight: true };
+}
+// Put a lawn into a route before stops[index] (index === stops.length → last stop).
+function insertStop(route, lawn, index, w) {
+  const pt = id => (id === 'depot' ? DEPOT_PT : stopById(id, w));
+  const prev = index === 0 ? DEPOT_PT : pt(route.stops[index - 1]);
+  const nextId = route.legs[index].to;
+  const stops = [...route.stops];
+  stops.splice(index, 0, lawn.id);
+  const legs = [...route.legs];
+  legs.splice(index, 1, straightLeg(prev, lawn, lawn.id), straightLeg(lawn, pt(nextId), nextId));
+  return { ...route, stops, legs };
+}
+// Real road path for one leg (public OSRM); null if it can't be reached.
+async function roadLeg(a, b, to) {
+  try {
+    const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
+    const data = await res.json();
+    const r = data.routes?.[0];
+    if (!r) return null;
+    const path = r.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    path.push([b.lat, b.lng]);
+    const cum = [0];
+    for (let i = 1; i < path.length; i++) cum.push(cum[i - 1] + metersBetween(path[i - 1], path[i]));
+    return { to, meters: Math.round(r.distance), seconds: Math.round(r.duration), path, cum, length: cum[cum.length - 1] };
+  } catch {
+    return null;
+  }
+}
 
 function pointAlong(leg, meters) {
   if (meters <= 0) return leg.path[0];
@@ -143,6 +188,7 @@ function baseJob(lawn) {
     earnings: lawn.price,
     repeatDays: 7,
     lawnId: lawn.id,
+    ...(lawn.quote ? { quote: lawn.quote, notes: lawn.notes, requested: lawn.requested } : {}),
   };
 }
 
@@ -164,9 +210,9 @@ function lotJob(lot) {
 
 // Today's list: every lawn on this weekday's routes (not in winter), plus every
 // plow lot when it snows.
-function jobsForDay(date, day, trucks) {
-  const lawns = isWinter(date) ? [] : ROUTES[day].slice(0, trucks).flatMap(route => route.stops.map(id => ({
-    ...baseJob(lawnById[id]),
+function jobsForDay(date, day, trucks, w = null) {
+  const lawns = isWinter(date) ? [] : Array.from({ length: trucks }, (_, t) => routeFor(w?.custom, day, t, date)).flatMap(route => route.stops.map(id => ({
+    ...baseJob(stopById(id, w)),
     id: `${id}@${date}`,
     status: 'assigned',
     scheduledDate: date,
@@ -281,6 +327,58 @@ const OUTLINE = { ring: demo.zipOutline, label: `ZIP ${demo.zip}` };
 
 const depotPositions = (trucks = MAX_TRUCKS) => Array.from({ length: trucks + PLOWS.length }, () => ({ lat: DEPOT[0], lng: DEPOT[1] }));
 
+const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+// Next date of weekday d after the demo's today (never today's route already running).
+const nextDateFor = (w, d) => addDays(w.weekStart, d > w.day ? d : d + 7);
+
+// New customers who just asked for a quote (outlined their yard on the website).
+const QUOTE_SEEDS = [
+  { near: 'wk-25', dLat: 0.0006, dLng: 0.0005, name: 'Hannah Brooks', bump: 40, notes: 'Side gate sticks — lift and push.', zones: [['Front Yard', 1500], ['Back Yard', 2600]], hoursAgo: 3 },
+  { near: 'wk-170', dLat: -0.0005, dLng: 0.0007, name: 'Victor Salazar', bump: 22, notes: '', zones: [['Front Yard', 2100], ['Back Yard', 1900]], hoursAgo: 20 },
+  { near: 'wk-330', dLat: 0.0004, dLng: -0.0006, name: 'Gwen Albrecht', bump: -30, notes: 'Please skip the flower bed by the porch.', zones: [['Front Yard', 1800], ['Back Yard', 3300], ['Side Yard', 700]], hoursAgo: 44 },
+];
+const ZONE_TINTS = ['#4ade80', '#38bdf8', '#facc15'];
+function demoQuotes(weekStart) {
+  return QUOTE_SEEDS.map((s, i) => {
+    const near = lawnById[s.near];
+    const lat = near.lat + s.dLat;
+    const lng = near.lng + s.dLng;
+    const [num, ...rest] = near.address.split(' ');
+    const address = `${Number(num) + s.bump} ${rest.join(' ')}`;
+    // Each zone a rectangle of about the right size, stacked front to back.
+    const mLat = 1 / 111320;
+    const mLng = 1 / (111320 * Math.cos((lat * Math.PI) / 180));
+    let y = 0;
+    const zones = s.zones.map(([name, sqFt], z) => {
+      const w = 22; // meters wide
+      const h = sqFt / 10.7639 / w;
+      const top = lat + (12 - y) * mLat;
+      const bottom = top - h * mLat;
+      y += h + 3;
+      const left = lng - (w / 2) * mLng;
+      const right = lng + (w / 2) * mLng;
+      return { name, color: ZONE_TINTS[z % ZONE_TINTS.length], sqFt, points: [[top, left], [top, right], [bottom, right], [bottom, left]] };
+    });
+    const totalSqFt = zones.reduce((sum, z) => sum + z.sqFt, 0);
+    const estimate = estimatePrice(totalSqFt);
+    return {
+      id: `quote-demo-${i + 1}`,
+      service: 'Quote: Lawn Cutting',
+      requested: ['Lawn Cutting'],
+      clientName: s.name,
+      clientPhone: `(313) 555-${String(3100 + i * 7).slice(-4)}`,
+      address,
+      location: { lat, lng },
+      status: 'quote',
+      assignedTo: null,
+      earnings: estimate,
+      notes: `Measured ${totalSqFt.toLocaleString()} sq ft.${s.notes ? ` Notes: ${s.notes}` : ''}`,
+      createdAt: iso(at(weekStart, 7) - s.hoursAgo * 3600000),
+      quote: { totalSqFt, estimate, wanted: ['Lawn Cutting'], center: { lat, lng }, zones },
+    };
+  });
+}
+
 // The demo starts on the Monday of the week holding the 1st of this month
 // (or the first Monday of winter, when the owner jumps to winter).
 function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), start = springStart()) {
@@ -297,7 +395,9 @@ function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), star
     delays: past.delays,
     payments: [],
     shifts: past.shifts,
-    jobs: [...past.jobs, ...jobsForDay(weekStart, 0, trucks)],
+    jobs: [...past.jobs, ...jobsForDay(weekStart, 0, trucks), ...demoQuotes(weekStart)],
+    custom: {},
+    extraLawns: {},
     expenses: past.expenses,
     technicians: crewFor(weekStart, trucks),
     trucks: freshTrucks(weekStart, trucks),
@@ -381,7 +481,7 @@ export function useDemoSim() {
         commitWorld({
           ...w, weekStart, day, week, night: 0, expenses, payments, lastEvent,
           dayCount: w.dayCount + 1,
-          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount)],
+          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount, w)],
           technicians: crewFor(next, w.truckCount),
           trucks: freshTrucks(next, w.truckCount),
         });
@@ -416,7 +516,7 @@ export function useDemoSim() {
         }
 
         const leg = route.legs[s.leg];
-        const target = leg.to === 'depot' ? null : stopById(leg.to);
+        const target = leg.to === 'depot' ? null : stopById(leg.to, w);
         const jobId = target ? `${target.id}@${today}` : null;
 
         if (s.phase === 'idle') {
@@ -539,6 +639,85 @@ export function useDemoSim() {
     return { sent: items.length };
   }, []);
 
+  // ---- New customers from quotes ----
+  // Every weekday × truck, with the best spot for this address, cheapest first.
+  const planRoutes = useCallback(job => {
+    const w = worldRef.current;
+    const routes = [];
+    for (let d = 0; d < 5; d++) {
+      const date = nextDateFor(w, d);
+      for (let t = 0; t < w.truckCount; t++) {
+        const route = routeFor(w.custom, d, t, date);
+        routes.push({
+          key: `${d}:${t}`, day: d, date, dayShort: DAY_SHORT[d],
+          dayLabel: new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+          techId: FOREMEN[t].id, techName: FOREMEN[t].name, truckName: FOREMEN[t].truckName,
+          stops: route.stops.map(id => { const l = stopById(id, w); return { id, lat: l.lat, lng: l.lng, label: l.address }; }),
+        });
+      }
+    }
+    return rankRoutes(routes, DEPOT_PT, job.location);
+  }, []);
+
+  // Accept a quote: the lawn joins that weekday's route (from its first date on) at the
+  // chosen spot, then the two new legs get real road paths.
+  const scheduleQuote = useCallback(async (jobId, plan) => {
+    const w = worldRef.current;
+    const job = w.jobs.find(j => j.id === jobId);
+    if (!job) return null;
+    let t = FOREMEN.findIndex(f => f.id === plan.techId);
+    if (t < 0 || t >= w.truckCount) t = 0;
+    // Day from the chosen date (weekends roll to Monday); never today's route in progress.
+    let date = plan.scheduledDate;
+    let wd = (new Date(`${date}T12:00:00`).getDay() + 6) % 7;
+    if (wd > 4) { date = addDays(date, 7 - wd); wd = 0; }
+    const today = addDays(w.weekStart, w.day);
+    while (date <= today) date = addDays(date, 7);
+    const base = routeFor(w.custom, wd, t, date);
+    const id = `nw-${Object.keys(w.extraLawns || {}).length + 1}`;
+    const lawn = {
+      id, name: job.clientName, address: job.address, lat: job.location.lat, lng: job.location.lng,
+      price: plan.price || job.earnings || 0, day: wd, truck: t,
+      quote: job.quote, notes: job.notes, requested: job.requested,
+    };
+    const extraLawns = { ...(w.extraLawns || {}), [id]: lawn };
+    const index = plan.slot && plan.slot.day === wd && plan.slot.techId === FOREMEN[t].id
+      ? plan.slot.index
+      : bestInsertion(base.stops.map(s => ({ id: s, ...stopById(s, w) })), DEPOT_PT, lawn).index;
+    const route = insertStop(base, lawn, index, { ...w, extraLawns });
+    const key = `${wd}:${t}`;
+    const custom = { ...(w.custom || {}), [key]: [...((w.custom || {})[key] || []), { from: date, route }] };
+    const next = {
+      ...w, custom, extraLawns,
+      jobs: w.jobs.filter(j => j.id !== jobId),
+      lastEvent: `✓ ${job.clientName} added · ${DAY_SHORT[wd]} · ${FOREMEN[t].truckName}`,
+    };
+    commitWorld(next);
+
+    // Swap the straight lines for real roads when they come back.
+    const prev = index === 0 ? DEPOT_PT : stopById(base.stops[index - 1], next);
+    const nextId = route.legs[index + 1].to;
+    const after = nextId === 'depot' ? DEPOT_PT : stopById(nextId, next);
+    const [legIn, legOut] = await Promise.all([roadLeg(prev, lawn, id), roadLeg(lawn, after, nextId)]);
+    if (legIn || legOut) {
+      const cur = worldRef.current;
+      const list = (cur.custom?.[key] || []).map(entry => {
+        if (entry.route !== route) return entry;
+        const legs = [...entry.route.legs];
+        if (legIn) legs[index] = legIn;
+        if (legOut) legs[index + 1] = legOut;
+        return { ...entry, route: { ...entry.route, legs } };
+      });
+      commitWorld({ ...cur, custom: { ...cur.custom, [key]: list } });
+    }
+    return { date, day: wd, truck: t };
+  }, [commitWorld]);
+
+  const declineQuote = useCallback(async jobId => {
+    const w = worldRef.current;
+    commitWorld({ ...w, jobs: w.jobs.map(j => (j.id === jobId ? { ...j, status: 'declined' } : j)) });
+  }, [commitWorld]);
+
   // Owner records a payment (cash/check, or a test card charge that can decline).
   const markPaid = useCallback(async (jobId, paid = true, method = 'cash', last4) => {
     const w = worldRef.current;
@@ -561,9 +740,9 @@ export function useDemoSim() {
 
   // Only rebuild these when a job changes, not on every truck movement.
   const todays = useMemo(() => world.jobs.filter(j => j.scheduledDate === date), [world.jobs, date]);
-  const lawns = useMemo(() => todays.map(j => ({ id: j.lawnId || j.lotId, name: j.clientName, price: j.earnings, lat: j.location.lat, lng: j.location.lng, status: j.status })), [todays]);
+  const lawns = useMemo(() => todays.map(j => ({ id: j.lawnId || j.lotId, key: lawnKey(j), name: j.clientName, price: j.earnings, lat: j.location.lat, lng: j.location.lng, status: j.status })), [todays]);
   // Parking-lot outlines (the plow geofence) for today's lots.
-  const lots = useMemo(() => todays.filter(j => j.lotId).map(j => ({ id: j.lotId, name: j.clientName, price: j.earnings, ring: lotById[j.lotId].ring, status: j.status })), [todays]);
+  const lots = useMemo(() => todays.filter(j => j.lotId).map(j => ({ id: j.lotId, key: lawnKey(j), name: j.clientName, price: j.earnings, ring: lotById[j.lotId].ring, status: j.status })), [todays]);
 
   return {
     playing, play, pause, reset, clearRecords, cleared,
@@ -589,6 +768,9 @@ export function useDemoSim() {
     markPaid,
     remindCustomer,
     remindCustomers,
+    planRoutes,
+    scheduleQuote,
+    declineQuote,
     payments: world.payments || [],
     cutToday: todays.filter(j => j.status === 'completed').length,
     totalToday: todays.length,

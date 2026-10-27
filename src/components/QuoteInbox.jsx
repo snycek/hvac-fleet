@@ -3,11 +3,15 @@ import YardMap from './YardMap.jsx';
 import { COMPANY_INFO } from '../data/services.js';
 import { formatPrice, formatSqFt } from '../lib/zones.js';
 import { REPEAT_OPTIONS, addDays, formatDay, todayString } from '../lib/dates.js';
+import { bestPerDay, fmtMiles } from '../lib/routeFit.js';
+
+const street = a => String(a || '').split(',')[0];
 
 const digits = phone => String(phone || '').replace(/[^\d+]/g, '');
 
-function timeAgo(iso) {
-  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+// now: the demo passes its own clock so ages match its calendar.
+function timeAgo(iso, now = Date.now()) {
+  const mins = Math.round((now - new Date(iso).getTime()) / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins} min ago`;
   const hrs = Math.round(mins / 60);
@@ -25,15 +29,28 @@ const isSnow = job => requestedServices(job).includes('Snow Removal');
 // Snow jobs go to plow drivers; everything else to lawn foremen.
 const crewFor = (job, techs) => techs.filter(t => (t.kind === 'plow') === isSnow(job));
 
-function AddCustomerModal({ job, foremen: allForemen, onSave, onClose }) {
+function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoutes, today = todayString() }) {
   const requested = requestedServices(job);
   const snow = isSnow(job);
   const foremen = crewFor(job, allForemen).length ? crewFor(job, allForemen) : allForemen;
+  // Route options for this address, cheapest first (lawn quotes only).
+  const [options] = useState(() => (!snow && planRoutes && job.location ? planRoutes(job) : []));
+  const best = options[0] || null;
+  const [slotKey, setSlotKey] = useState(best?.key || null);
+  const slot = options.find(o => o.key === slotKey) || null;
+  const days = bestPerDay(options);
   const [price, setPrice] = useState(String(job.quote?.estimate ?? job.earnings ?? ''));
-  const [date, setDate] = useState(addDays(todayString(), 1));
+  const [date, setDate] = useState(best?.date || addDays(today, 1));
   // Snow: dispatched every time it snows, not on a fixed repeat.
   const [repeatDays, setRepeatDays] = useState(requested.includes('Lawn Cutting') && !snow ? 7 : 0);
-  const [techId, setTechId] = useState(foremen.length === 1 ? foremen[0].id : '');
+  const [techId, setTechId] = useState(best?.techId || (foremen.length === 1 ? foremen[0].id : ''));
+  const pickSlot = o => { setSlotKey(o.key); setDate(o.date); setTechId(o.techId); };
+  // Picking a foreman keeps the day and moves to that foreman's best spot that day.
+  const pickTech = id => {
+    setTechId(id);
+    const o = slot && options.find(x => x.day === slot.day && x.techId === id);
+    if (o) pickSlot(o); else setSlotKey(null);
+  };
   const [state, setState] = useState({ saving: false, error: '' });
 
   const save = async (e) => {
@@ -49,6 +66,7 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose }) {
         price: Number(price) || 0,
         techId,
         service: requested.join(', ') || 'Lawn Service',
+        ...(slot && slot.techId === techId ? { slot: { key: slot.key, day: slot.day, techId: slot.techId, index: slot.index } } : {}),
       });
     } catch (err) {
       setState({ saving: false, error: err.message || 'Could not save.' });
@@ -83,9 +101,33 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose }) {
           )}
         </div>
 
+        {options.length > 0 && (
+          <div className="fit">
+            <label className="form-label">Where it fits on the route</label>
+            {slot && (
+              <div className={`fit-best${slot.key === best.key ? '' : ' alt'}`}>
+                <div><b>{slot.key === best.key ? '⭐ Best fit: ' : 'Your pick: '}{slot.dayLabel} · {slot.truckName ? `${slot.truckName} · ` : ''}{slot.techName}</b></div>
+                <div className="fit-sub">
+                  {slot.after ? <>after <b>{street(slot.after.label)}</b></> : 'first stop out of the shop'}
+                  {slot.before ? <>, before <b>{street(slot.before.label)}</b></> : ', last stop before home'}
+                  {' '}· stop {slot.index + 1} of {slot.stopsCount + 1} · adds <b>{fmtMiles(slot.cost)}</b> of driving
+                </div>
+              </div>
+            )}
+            <div className="fit-days" role="group" aria-label="Day of the week">
+              {days.map(o => (
+                <button key={o.day} type="button" aria-pressed={slot?.day === o.day} onClick={() => pickSlot(o)} title={`Best that day: ${o.techName} · +${fmtMiles(o.cost)}`}>
+                  <span>{o.key === best.key ? '⭐ ' : ''}{o.dayShort}</span>
+                  <small>+{fmtMiles(o.cost)}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div>
           <label className="form-label">{snow ? 'Plow from' : 'First cut day'}</label>
-          <input className="form-input" type="date" min={todayString()} value={date} onChange={e => setDate(e.target.value)} required />
+          <input className="form-input" type="date" min={today} value={date} onChange={e => { setDate(e.target.value); if (slot && e.target.value !== slot.date) setSlotKey(null); }} required />
           {date && <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{formatDay(date)}</div>}
         </div>
 
@@ -119,11 +161,12 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose }) {
 
         <div>
           <label className="form-label">{snow ? 'Plow driver' : 'Foreman'}</label>
-          <select className="form-input" value={techId} onChange={e => setTechId(e.target.value)} required>
+          <select className="form-input" value={techId} onChange={e => pickTech(e.target.value)} required>
             <option value="">{snow ? 'Choose a plow…' : 'Choose a foreman…'}</option>
-            {foremen.map(t => (
-              <option key={t.id} value={t.id}>{t.name}{t.truckName ? ` · ${t.truckName}` : ''}</option>
-            ))}
+            {foremen.map(t => {
+              const o = slot && options.find(x => x.day === slot.day && x.techId === t.id);
+              return <option key={t.id} value={t.id}>{t.name}{t.truckName ? ` · ${t.truckName}` : ''}{o ? ` — +${fmtMiles(o.cost)}` : ''}</option>;
+            })}
           </select>
         </div>
 
@@ -140,7 +183,7 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose }) {
   );
 }
 
-function QuoteCard({ job, onAdd, onDecline }) {
+function QuoteCard({ job, onAdd, onDecline, now }) {
   const requested = requestedServices(job);
   const first = job.clientName.split(' ')[0];
   const smsBody = encodeURIComponent(`Hi ${first}, this is ${COMPANY_INFO.name} about your quote for ${requested.join(', ').toLowerCase() || 'lawn service'}.`);
@@ -160,7 +203,7 @@ function QuoteCard({ job, onAdd, onDecline }) {
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(quote.estimate)) : '—'}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(quote.totalSqFt)} · quoted ${timeAgo(job.createdAt)}` : `Not measured · ${timeAgo(job.createdAt)}`}</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(quote.totalSqFt)} · quoted ${timeAgo(job.createdAt, now)}` : `Not measured · ${timeAgo(job.createdAt, now)}`}</div>
         </div>
       </div>
 
@@ -200,11 +243,14 @@ function QuoteCard({ job, onAdd, onDecline }) {
 }
 
 /** New quotes waiting for a yes/no (part of the owner's To-Do). */
-export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob }) {
+export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today }) {
   const [adding, setAdding] = useState(null);
   const [toast, setToast] = useState('');
   const quotes = jobs.filter(j => j.status === 'quote').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const foremen = technicians.filter(t => t.status !== 'pending_approval');
+  // "Now" on the hub's calendar (the demo runs on its own dates).
+  const [clock] = useState(() => new Date());
+  const now = today ? new Date(`${today}T${clock.toTimeString().slice(0, 8)}`).getTime() : clock.getTime();
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(''), 4000); };
 
@@ -219,7 +265,7 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob 
     await scheduleJob(job.id, plan);
     const foreman = foremen.find(t => t.id === plan.techId);
     setAdding(null);
-    flash(`${job.clientName} added — first cut ${formatDay(plan.scheduledDate)} with ${foreman?.name || 'your foreman'}.`);
+    flash(`${job.clientName} added — first cut ${formatDay(plan.scheduledDate)} with ${foreman?.name || 'your foreman'}${plan.slot ? ', slotted into the route' : ''}.`);
   };
 
   if (!quotes.length && !toast && !adding) return null;
@@ -239,13 +285,13 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob 
       {quotes.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
           {quotes.map(job => (
-            <QuoteCard key={job.id} job={job} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} />
+            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} />
           ))}
         </div>
       )}
 
       {adding && (
-        <AddCustomerModal job={adding} foremen={foremen} onSave={handleSave} onClose={() => setAdding(null)} />
+        <AddCustomerModal job={adding} foremen={foremen} onSave={handleSave} onClose={() => setAdding(null)} planRoutes={planRoutes} today={today} />
       )}
     </div>
   );

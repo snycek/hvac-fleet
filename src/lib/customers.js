@@ -1,7 +1,7 @@
 // One customer's history (same service address = same customer): visits, payments
 // (including declined cards) and every reminder sent — the audit trail behind the
 // customer card. Shared by the owner hub (live + demo).
-import { lawnKey } from './lawns.js';
+import { customerNotes as customerNoteText, lawnKey } from './lawns.js';
 import { invoiceNumber, serviceDate, serviceLabel } from './invoices.js';
 import { METHODS } from './payments.js';
 import { addDays } from './dates.js';
@@ -64,8 +64,25 @@ export function customerHistory({ jobs, payments = [], key, today }) {
     .map(p => ({ id: p.id, at: p.at, amount: p.amount, visits: p.jobIds.length, status: 'declined', method: 'card', card: `${p.brand} ••${p.last4}`, reason: p.reason }));
   const paymentRows = [...byPayment.values(), ...declines].sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
+  // Property: the areas they outlined when they asked for a quote (kept on every repeat cut).
+  const quoted = [...mine].reverse().find(j => j.quote?.zones?.length) || mine.find(j => j.quote) || null;
+  const q = quoted?.quote || null;
+  const property = {
+    center: q?.center || latest.location || null,
+    zones: (q?.zones || []).map((z, i) => ({ ...z, id: `${quoted.id}-z${i}` })),
+    totalSqFt: q?.totalSqFt || 0,
+    requested: q?.wanted || latest.requested || [],
+    quotedPrice: q?.estimate ?? null,
+    price: latest.earnings || 0,
+    service: serviceLabel(latest),
+    repeatDays: latest.repeatDays || 0,
+    perSnowfall: !!latest.perSnowfall,
+    notes: customerNoteText(quoted || latest),
+  };
+
   return {
     key,
+    property,
     name: latest.clientName || '',
     address: latest.address || '',
     phone: latest.clientPhone || '',

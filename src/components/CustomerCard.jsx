@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { customerHistory, methodLabel } from '../lib/customers.js';
 import { METHODS } from '../lib/payments.js';
+import { formatPrice, formatSqFt } from '../lib/zones.js';
+import { repeatLabel } from '../lib/dates.js';
+import YardMap from './YardMap.jsx';
 
 const usd = n => `$${Number(n || 0).toFixed(2)}`;
 const day = iso => (iso ? new Date(String(iso).length === 10 ? `${iso}T12:00:00` : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
@@ -36,6 +39,7 @@ export default function CustomerCard({ customerKey, jobs, payments, today, onClo
     ['payments', `💵 Payments · ${h.payments.length}`],
     ['contacts', `📨 Contact history · ${h.contacts.length}`],
     ['visits', `✂️ Visits · ${h.visits.length}`],
+    ['property', '🗺️ Property'],
   ];
 
   return createPortal(
@@ -104,6 +108,36 @@ export default function CustomerCard({ customerKey, jobs, payments, today, onClo
               ))}
             </ol>
           ) : <div className="cust-empty">No reminders or messages sent yet.</div>)}
+
+          {tab === 'property' && (() => {
+            const p = h.property;
+            return (
+              <div className="cust-prop">
+                {p.center ? <YardMap center={p.center} zones={p.zones} readOnly height="280px" /> : <div className="cust-empty">No map location on file.</div>}
+                {p.zones.length > 0 ? (
+                  <>
+                    <div className="cust-prop-total"><b>{formatSqFt(p.totalSqFt)}</b> outlined{p.quotedPrice != null ? <> · website quoted <b>{formatPrice(p.quotedPrice)}</b></> : p.requested.includes('Snow Removal') ? ' · snow priced by you' : ''}</div>
+                    <ul className="cust-prop-zones">
+                      {p.zones.map(z => (
+                        <li key={z.id}><span style={{ background: z.color }} />{z.name}<b>{formatSqFt(z.sqFt)}</b></li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <div className="cust-dim" style={{ margin: '8px 0' }}>No outline on file — this customer was added before online quotes (or skipped the map).</div>
+                )}
+                <table className="cust-table">
+                  <tbody>
+                    <tr><th>Service</th><td>{p.service}</td></tr>
+                    {p.requested.length > 0 && <tr><th>Asked for</th><td>{p.requested.join(', ')}</td></tr>}
+                    <tr><th>Price</th><td>{formatPrice(p.price)} {p.perSnowfall ? 'per push' : 'per visit'}</td></tr>
+                    <tr><th>Schedule</th><td>{p.perSnowfall ? 'Every snowfall' : repeatLabel(p.repeatDays)}</td></tr>
+                    {p.notes && <tr><th>Their notes</th><td>📝 {p.notes}</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
 
           {tab === 'visits' && (
             <table className="cust-table">

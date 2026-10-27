@@ -197,8 +197,11 @@ const LAWN_COLORS = { completed: '#3fb950', in_progress: '#e67e22', en_route: '#
  * fitBounds: optional [[lat, lng], [lat, lng]] to frame the map (e.g. demo area).
  * outline: optional { ring: [[lat, lng], ...], label } service-area boundary (dashed).
  */
-export default function FleetMap({ technicians = [], jobs = [], selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false }) {
+export default function FleetMap({ technicians = [], jobs = [], selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false, onPickCustomer = null }) {
   const lotLayer   = useRef(null);
+  // Click a lawn or lot → that customer's card (kept in a ref so markers don't rebuild).
+  const pickRef = useRef(onPickCustomer);
+  useEffect(() => { pickRef.current = onPickCustomer; }, [onPickCustomer]);
   const mapRef     = useRef(null);
   const mapObj     = useRef(null);
   const markersRef = useRef({});
@@ -292,8 +295,9 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
     lawnLayer.current.clearLayers();
     (lawns || []).forEach(l => {
       const color = LAWN_COLORS[l.status] || '#8b949e';
-      L.circleMarker([l.lat, l.lng], { radius: 7, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 })
-        .bindTooltip(`${l.name} · $${l.price}`, { direction: 'top', offset: [0, -6] })
+      L.circleMarker([l.lat, l.lng], { radius: 7, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1, bubblingMouseEvents: false })
+        .on('click', () => { if (l.key && pickRef.current) pickRef.current(l.key); })
+        .bindTooltip(`${l.name} · ${l.price}${l.key ? ' · click for account' : ''}`, { direction: 'top', offset: [0, -6] })
         .addTo(lawnLayer.current);
     });
   }, [lawns]);
@@ -306,7 +310,8 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
     lotLayer.current.clearLayers();
     (lots || []).forEach(l => {
       const color = LAWN_COLORS[l.status] || '#58a6ff';
-      L.polygon(l.ring, { color, weight: 2, fillColor: color, fillOpacity: l.status === 'completed' ? 0.35 : 0.18 })
+      L.polygon(l.ring, { color, weight: 2, fillColor: color, fillOpacity: l.status === 'completed' ? 0.35 : 0.18, bubblingMouseEvents: false })
+        .on('click', () => { if (l.key && pickRef.current) pickRef.current(l.key); })
         .bindTooltip(`❄️ ${l.name} · $${l.price}/push`, { direction: 'top', sticky: true })
         .addTo(lotLayer.current);
     });

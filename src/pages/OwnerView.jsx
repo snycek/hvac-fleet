@@ -9,6 +9,7 @@ import { laborExpenses } from '../lib/payroll.js';
 import { SPEEDS, useDemoSim } from '../hooks/useDemoSim.js';
 import FleetMap from '../components/FleetMap.jsx';
 import OwnerTodo from '../components/OwnerTodo.jsx';
+import QuoteInbox from '../components/QuoteInbox.jsx';
 import ProfitLoss from '../components/ProfitLoss.jsx';
 import LawnsPanel from '../components/LawnsPanel.jsx';
 import CrewReport from '../components/CrewReport.jsx';
@@ -19,10 +20,11 @@ import PayrollView from '../components/PayrollView.jsx';
 import PrintInvoices from '../components/PrintInvoices.jsx';
 import CustomerCard from '../components/CustomerCard.jsx';
 import { accountReminder } from '../lib/customers.js';
+import { rankRoutes } from '../lib/routeFit.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
-import { formatDay, todayString } from '../lib/dates.js';
+import { addDays, formatDay, todayString } from '../lib/dates.js';
 import { dayOf, hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
 
 // Stable no-op so memoized panels don't re-render in demo mode.
@@ -102,8 +104,8 @@ export default function OwnerView() {
   const markPaid      = demoOn ? sim.markPaid : live.markPaid;
   const remindCustomer = demoOn ? sim.remindCustomer : live.remindCustomer;
   const remindCustomersFn = demoOn ? sim.remindCustomers : live.remindCustomers;
-  const scheduleJob   = demoOn ? noop : live.scheduleJob;
-  const declineJob    = demoOn ? noop : live.declineJob;
+  const scheduleJob   = demoOn ? sim.scheduleQuote : live.scheduleJob;
+  const declineJob    = demoOn ? sim.declineQuote : live.declineJob;
   const addExpense    = demoOn ? noop : liveExpenses.addExpense;
   const logExpense    = demoOn ? noop : liveExpenses.logExpense;
   const rejectExpense = demoOn ? noop : liveExpenses.rejectExpense;
@@ -174,6 +176,29 @@ export default function OwnerView() {
   };
   const openCustomer = job => setCustomerKey(lawnKey(job));
 
+  // Accept quote: where would this address fit best? Demo uses its weekly routes; live
+  // looks at each foreman's scheduled stops over the next 5 weekdays.
+  const livePlanRoutes = job => {
+    const crews = technicians.filter(t => t.kind !== 'plow' && t.status !== 'pending_approval');
+    const routes = [];
+    for (let i = 1, n = 0; n < 5 && i < 10; i++) {
+      const date = addDays(today, i);
+      const wd = new Date(`${date}T12:00:00`).getDay();
+      if (wd === 0 || wd === 6) continue;
+      n++;
+      for (const t of crews) {
+        const stops = allJobs.filter(j => j.assignedTo === t.id && j.scheduledDate === date && j.location?.lat && !['quote', 'declined'].includes(j.status))
+          .map(j => ({ id: j.id, lat: j.location.lat, lng: j.location.lng, label: j.address }));
+        const depot = t.location?.lat ? t.location : stops[0] || job.location;
+        routes.push({ key: `${date}:${t.id}`, day: wd, date, depot, dayShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd],
+          dayLabel: new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
+          techId: t.id, techName: t.name, truckName: t.truckName || '', stops });
+      }
+    }
+    return rankRoutes(routes, job.location, job.location);
+  };
+  const planRoutes = demoOn ? sim.planRoutes : livePlanRoutes;
+
   // Today's visits for one truck (route order) or every truck.
   const todaysVisits = techId => jobs
     .filter(j => jobDay(j, today) === today && j.status !== 'quote' && (!techId || j.assignedTo === techId))
@@ -210,11 +235,12 @@ export default function OwnerView() {
     };
   }, [jobs, books, today, technicians, delays]);
 
+  // New quote requests have their own tab now.
+  const quoteCount = useMemo(() => allJobs.filter(j => j.status === 'quote').length, [allJobs]);
   const todoCount = useMemo(() => (
-    allJobs.filter(j => j.status === 'quote').length
-    + expenses.filter(e => e.status === 'pending').length
+    expenses.filter(e => e.status === 'pending').length
     + new Set(jobs.filter(j => j.status === 'completed' && !j.paid).map(lawnKey)).size
-  ), [allJobs, expenses, jobs]);
+  ), [expenses, jobs]);
 
   const kpiGroups = [
     { title: 'Today', tiles: [
@@ -330,18 +356,23 @@ export default function OwnerView() {
               <CollapseButton collapsed={collapsed.todo} onToggle={() => toggle('todo')} label="To-Do" />
               <div className="dash-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={leftTab === 'todo'} onClick={() => setLeftTab('todo')}>📥 To-Do{todoCount ? <span className="tab-count">{todoCount}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'quotes'} onClick={() => setLeftTab('quotes')}>📝 Quotes{quoteCount ? <span className="tab-count new">{quoteCount}</span> : null}</button>
                 <button type="button" role="tab" aria-selected={leftTab === 'lawns'} onClick={() => setLeftTab('lawns')}>🌱 Lawns<span className="tab-count muted">{stats.lawns}</span></button>
               </div>
             </div>
             {!collapsed.todo && <div className="dash-panel-body">
-              {leftTab === 'todo' ? (
+              {leftTab === 'quotes' ? (
+                quoteCount ? (
+                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} />
+                ) : <div className="cust-empty">✓ No new quote requests. New ones from the website land here.</div>
+              ) : leftTab === 'todo' ? (
                 <OwnerTodo
-                  bare
+                  bare hideQuotes
                   jobs={allJobs} technicians={technicians} expenses={expenses}
                   scheduleJob={scheduleJob} declineJob={declineJob} markPaid={markPaid}
                   logExpense={logExpense} rejectExpense={rejectExpense}
                   remindCustomer={remindCustomer} today={today}
-                  remindAccounts={remindAccounts} openCustomer={openCustomer}
+                  remindAccounts={remindAccounts} openCustomer={openCustomer} planRoutes={planRoutes}
                   // From Unpaid: print off their latest unpaid cut so every older one shows as balance.
                   printInvoice={job => {
                     const latest = allJobs.filter(j => lawnKey(j) === lawnKey(job) && j.status === 'completed' && !j.paid)
@@ -411,6 +442,7 @@ export default function OwnerView() {
                   jobs={jobs}
                   selectedTechId={selectedTechId}
                   {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
+                  onPickCustomer={key => setCustomerKey(key)}
                 />
               </div>
             </div>

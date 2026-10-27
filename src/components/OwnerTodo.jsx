@@ -94,8 +94,12 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   const [customLate, setCustomLate] = useState('');
   const [includeRecent, setIncludeRecent] = useState(false);
   const threshold = lateMin || PAST_DUE_DAYS;
-  const shownUnpaid = lateMin ? unpaid.filter(j => daysSinceCut(j, today) >= lateMin) : unpaid;
-  const behind = pastDueCustomers(jobs, today, threshold);
+  // Address / name search: narrows the list and who "Remind all" goes to.
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
+  const matches = x => !q || `${x.address || ''} ${x.clientName || x.name || ''}`.toLowerCase().includes(q);
+  const shownUnpaid = unpaid.filter(j => (!lateMin || daysSinceCut(j, today) >= lateMin) && matches(j));
+  const behind = pastDueCustomers(jobs, today, threshold).filter(matches);
   const toRemind = includeRecent ? behind : behind.filter(c => !c.recentlyReminded);
   const [bulk, setBulk] = useState({ open: false, busy: false, done: '' });
   const remindAll = async () => {
@@ -182,7 +186,13 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               ))}
               <input inputMode="numeric" placeholder="Custom" aria-label="Custom days late" value={customLate}
                 onChange={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setCustomLate(v); setLateMin(Number(v) || 0); setBulk({ open: false, busy: false, done: '' }); }} />
-              {lateMin > 0 && <span className="cust-dim">{shownUnpaid.length} cut{shownUnpaid.length === 1 ? '' : 's'} · {behind.length} customer{behind.length === 1 ? '' : 's'}</span>}
+              {(lateMin > 0 || q) && <span className="cust-dim">{shownUnpaid.length} cut{shownUnpaid.length === 1 ? '' : 's'} · {behind.length} customer{behind.length === 1 ? '' : 's'}</span>}
+            </div>
+            <div className="late-filter">
+              <span className="cust-dim">Address</span>
+              <input className="addr-search" type="search" placeholder="Search address or name…" aria-label="Search unpaid by address or name" value={search}
+                onChange={e => { setSearch(e.target.value); setBulk({ open: false, busy: false, done: '' }); }} />
+              {q && <button type="button" onClick={() => setSearch('')}>Clear</button>}
             </div>
             {remindAccounts && behind.length > 0 && (
               <div className="remind-all">

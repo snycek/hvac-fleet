@@ -1,10 +1,10 @@
 import { memo, useState } from 'react';
 import QuoteInbox from './QuoteInbox.jsx';
 import { receiptUrl } from '../hooks/useExpenses.js';
-import { MANUAL_EXPENSE_TYPES, PAST_DUE_DAYS, daysSinceCut, expenseType, isPastDue, money, reminderMessage, shortDate } from '../lib/lawns.js';
+import { MANUAL_EXPENSE_TYPES, PAST_DUE_DAYS, daysSinceCut, lawnKey, expenseType, isPastDue, money, reminderMessage, shortDate } from '../lib/lawns.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { METHODS, TEST_CARDS } from '../lib/payments.js';
-import { REMIND_GAP_DAYS, pastDueCustomers } from '../lib/customers.js';
+import { REMIND_GAP_DAYS, contactsFor, pastDueCustomers } from '../lib/customers.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
@@ -82,6 +82,12 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   const problems = unpaid.filter(j => j.paymentIssue);
   const [choosing, setChoosing] = useState(null); // job id whose "Mark paid" menu is open
   const [testCard, setTestCard] = useState('4242');
+  // Pay every open cut on an account (one tap for the whole balance).
+  const recordAll = async (acct, method, last4) => {
+    setPaying(acct.key);
+    try { for (const j of acct.jobs) await markPaid(j.id, true, method, last4); } finally { setPaying(null); setChoosing(null); }
+  };
+  const [openAcct, setOpenAcct] = useState(null); // account whose cuts are showing
   const record = async (job, method, last4) => {
     setPaying(job.id);
     try { await markPaid(job.id, true, method, last4); } finally { setPaying(null); setChoosing(null); }
@@ -100,6 +106,31 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   const matches = x => !q || `${x.address || ''} ${x.clientName || x.name || ''}`.toLowerCase().includes(q);
   const shownUnpaid = unpaid.filter(j => (!lateMin || daysSinceCut(j, today) >= lateMin) && matches(j));
   const behind = pastDueCustomers(jobs, today, threshold).filter(matches);
+  const accounts = (() => {
+    const byKey = new Map();
+    for (const j of shownUnpaid) {
+      const k = lawnKey(j);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(j);
+    }
+    return [...byKey.entries()].map(([key, list]) => {
+      const cuts = list.slice().sort((a, b) => String(a.completedAt).localeCompare(String(b.completedAt)));
+      const latest = cuts[cuts.length - 1];
+      const contacts = contactsFor(jobs.filter(j => lawnKey(j) === key));
+      return {
+        key, jobs: cuts, latest,
+        name: latest.clientName, address: latest.address, email: latest.clientEmail || latest.email || '', phone: latest.clientPhone || '',
+        balance: cuts.reduce((s, j) => s + (j.earnings || 0), 0),
+        oldestDays: daysSinceCut(cuts[0], today),
+        oldestDate: String(cuts[0].completedAt || '').slice(0, 10),
+        lastReminder: contacts[0] || null, reminders: contacts.length,
+      };
+    }).sort((a, b) => b.oldestDays - a.oldestDays);
+  })();
+  const remindOne = async acct => {
+    setReminding(acct.key);
+    try { await (remindAccounts ? remindAccounts([acct]) : remindCustomer(acct.latest.id, reminderMessage(acct.latest, COMPANY_INFO.name))); } finally { setReminding(null); }
+  };
   const toRemind = includeRecent ? behind : behind.filter(c => !c.recentlyReminded);
   const [bulk, setBulk] = useState({ open: false, busy: false, done: '' });
   const remindAll = async () => {
@@ -117,7 +148,8 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     try { await remindCustomer(job.id, reminderMessage(job, COMPANY_INFO.name)); } finally { setReminding(null); }
   };
   const unpaidTotal = unpaid.reduce((s, j) => s + (j.earnings || 0), 0);
-  const total = quotes.length + toLog.length + unpaid.length;
+  const unpaidAccounts = new Set(unpaid.map(lawnKey)).size;
+  const total = quotes.length + toLog.length + unpaidAccounts;
 
 
   return (
@@ -174,7 +206,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
         {unpaid.length > 0 && (
           <div>
             <h3 style={sectionTitle}>
-              Unpaid · {unpaid.length} · {money(unpaidTotal)}
+              Unpaid · {unpaidAccounts} account{unpaidAccounts === 1 ? '' : 's'} · {money(unpaidTotal)}
               {pastDue.length > 0 && <span className="past-due-count" title={`${pastDue.length} cut${pastDue.length === 1 ? '' : 's'} unpaid ${PAST_DUE_DAYS}+ days`}> · ⚠️ {pastDue.length} past {PAST_DUE_DAYS} days</span>}
             </h3>
             <div className="late-filter" role="group" aria-label="Days late">
@@ -186,7 +218,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               ))}
               <input inputMode="numeric" placeholder="Custom" aria-label="Custom days late" value={customLate}
                 onChange={e => { const v = e.target.value.replace(/\D/g, '').slice(0, 3); setCustomLate(v); setLateMin(Number(v) || 0); setBulk({ open: false, busy: false, done: '' }); }} />
-              {(lateMin > 0 || q) && <span className="cust-dim">{shownUnpaid.length} cut{shownUnpaid.length === 1 ? '' : 's'} · {behind.length} customer{behind.length === 1 ? '' : 's'}</span>}
+              {(lateMin > 0 || q) && <span className="cust-dim">{accounts.length} account{accounts.length === 1 ? '' : 's'} · {shownUnpaid.length} cut{shownUnpaid.length === 1 ? '' : 's'}</span>}
             </div>
             <div className="late-filter">
               <span className="cust-dim">Address</span>
@@ -221,57 +253,80 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               </div>
             )}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              {(showAllUnpaid ? shownUnpaid : shownUnpaid.slice(0, UNPAID_PREVIEW)).map((job, i) => {
-                const days = daysSinceCut(job, today);
-                const late = days >= PAST_DUE_DAYS;
-                const lastReminder = job.reminders?.[job.reminders.length - 1];
+              {(showAllUnpaid ? accounts : accounts.slice(0, UNPAID_PREVIEW)).map((acct, i) => {
+                const late = acct.oldestDays >= PAST_DUE_DAYS;
+                const open = openAcct === acct.key;
+                const n = acct.jobs.length;
                 return (
-                <div key={job.id} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
+                <div key={acct.key} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 170px', minWidth: 0 }}>
-                    {late && <span className="yield" role="img" aria-label={`${days} days past due`} title={`${days} days past due`}>⚠️</span>}
-                    <Addr job={job} />
-                    <span style={{ color: 'var(--text-muted)' }}> · {job.clientName}</span>
-                    {lastReminder && (
-                      <span className="reminded" title={lastReminder.message}> · 🔔 {shortDate(lastReminder.at)}{job.reminders.length > 1 ? ` ×${job.reminders.length}` : ''}</span>
+                    {late && <span className="yield" role="img" aria-label={`${acct.oldestDays} days past due`} title={`Oldest open cut ${acct.oldestDays} days`}>⚠️</span>}
+                    <Addr job={acct.latest} />
+                    <span style={{ color: 'var(--text-muted)' }}> · {acct.name}</span>
+                    {acct.lastReminder && (
+                      <span className="reminded" title={acct.lastReminder.message}> · 🔔 {shortDate(acct.lastReminder.at)}{acct.reminders > 1 ? ` ×${acct.reminders}` : ''}</span>
                     )}
                   </span>
-                  <span style={{ color: late ? '#f0b429' : 'var(--text-muted)', width: '84px', whiteSpace: 'nowrap', fontWeight: late ? 700 : 400 }} title={`Cut ${shortDate(job.completedAt)}`}>✂️ {shortDate(job.completedAt)} · {days}d</span>
-                  <span style={{ fontWeight: 700, width: '70px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
+                  <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
+                    style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? 'Show each cut' : `Cut ${shortDate(acct.jobs[0].completedAt)}`}>
+                    {n > 1 ? (open ? '▾' : '▸') : '✂️'} {n > 1 ? `${n} cuts · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d
+                  </button>
+                  <span style={{ fontWeight: 700, width: '62px', textAlign: 'right' }}>{money(acct.balance)}</span>
                   <span className="row-actions">
                   {printInvoice && (
-                    <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(job)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${job.clientName}`}>🖨</button>
+                    <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(acct.latest)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${acct.name}`}>🖨</button>
                   )}
-                  {remindCustomer && (
-                    <button type="button" className="btn-ghost remind-btn" disabled={reminding === job.id} onClick={() => remind(job)}
-                      title={`Send ${job.clientName.split(' ')[0]} a payment reminder`}>
-                      {reminding === job.id ? '…' : '🔔 Remind'}
+                  {(remindAccounts || remindCustomer) && (
+                    <button type="button" className="btn-ghost remind-btn" disabled={reminding === acct.key} onClick={() => remindOne(acct)}
+                      title={`Send ${String(acct.name).split(' ')[0]} one reminder for the whole balance`}>
+                      {reminding === acct.key ? '…' : '🔔 Remind'}
                     </button>
                   )}
-                  <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === job.id} onClick={() => setChoosing(choosing === job.id ? null : job.id)}
-                    aria-expanded={choosing === job.id} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}>
-                    {paying === job.id ? '…' : bare ? 'Mark paid' : '💵 Mark Paid'}
+                  <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}
+                    aria-expanded={choosing === acct.key} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}
+                    title={n > 1 ? `Mark all ${n} cuts paid (${money(acct.balance)})` : 'Mark paid'}>
+                    {paying === acct.key ? '…' : n > 1 ? 'Mark all paid' : 'Mark paid'}
                   </button>
                   </span>
-                  {choosing === job.id && (
+                  {choosing === acct.key && (
                     <div className="pay-choose">
-                      <span>Paid by</span>
-                      <button type="button" onClick={() => record(job, 'cash')}>{METHODS.cash.icon} Cash</button>
-                      <button type="button" onClick={() => record(job, 'check')}>{METHODS.check.icon} Check</button>
+                      <span>{n > 1 ? `All ${n} cuts · ${money(acct.balance)} paid by` : 'Paid by'}</span>
+                      <button type="button" onClick={() => recordAll(acct, 'cash')}>{METHODS.cash.icon} Cash</button>
+                      <button type="button" onClick={() => recordAll(acct, 'check')}>{METHODS.check.icon} Check</button>
                       <span className="pay-choose-card">
                         <select value={testCard} onChange={e => setTestCard(e.target.value)} aria-label="Test card" title="Test card processor — pick a card that approves or declines">
                           {TEST_CARD_ORDER.map(l4 => [l4, TEST_CARDS[l4]]).map(([l4, c]) => <option key={l4} value={l4}>{c.brand} ••{l4}{c.ok ? '' : ` (${c.reason.toLowerCase()})`}</option>)}
                         </select>
-                        <button type="button" onClick={() => record(job, 'card', testCard)}>{METHODS.card.icon} Charge card</button>
+                        <button type="button" onClick={() => recordAll(acct, 'card', testCard)}>{METHODS.card.icon} Charge card</button>
                       </span>
+                    </div>
+                  )}
+                  {open && n > 1 && (
+                    <div className="acct-cut-list">
+                      {acct.jobs.map(job => {
+                        const d = daysSinceCut(job, today);
+                        return (
+                          <div key={job.id} className="acct-cut">
+                            <span className={d >= PAST_DUE_DAYS ? 'cust-warn' : 'cust-dim'}>✂️ {shortDate(job.completedAt)} · {d}d</span>
+                            <span style={{ fontWeight: 600 }}>{money(job.earnings || 0)}</span>
+                            <span className="acct-cut-pay">
+                              <span className="cust-dim">Paid:</span>
+                              <button type="button" disabled={paying === job.id} onClick={() => record(job, 'cash')}>{METHODS.cash.icon} Cash</button>
+                              <button type="button" disabled={paying === job.id} onClick={() => record(job, 'check')}>{METHODS.check.icon} Check</button>
+                              <button type="button" disabled={paying === job.id} onClick={() => record(job, 'card', testCard)}>{METHODS.card.icon} Card</button>
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
                 );
               })}
             </div>
-            {shownUnpaid.length > UNPAID_PREVIEW && (
+            {accounts.length > UNPAID_PREVIEW && (
               <button type="button" className="btn-ghost" onClick={() => setShowAllUnpaid(s => !s)} style={{ marginTop: '8px', padding: '6px 12px', fontSize: '12px' }}>
-                {showAllUnpaid ? 'Show less' : `Show ${shownUnpaid.length - UNPAID_PREVIEW} more`}
+                {showAllUnpaid ? 'Show less' : `Show ${accounts.length - UNPAID_PREVIEW} more`}
               </button>
             )}
           </div>

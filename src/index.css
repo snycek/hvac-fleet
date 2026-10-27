@@ -633,3 +633,13 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .late-filter input { width: 64px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 999px; padding: 3px 10px; font-size: 12px; }
 .remind-include { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
 .late-filter input.addr-search { width: min(320px, 100%); flex: 0 1 320px; }
+
+/* Unpaid grouped by account */
+.acct-cuts { background: none; border: none; padding: 2px 4px; font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; border-radius: 6px; }
+.acct-cuts:hover { background: var(--bg-elevated); }
+.acct-cut-list { flex-basis: 100%; display: flex; flex-direction: column; gap: 2px; margin: 2px 0 0 18px; border-left: 2px solid var(--border); padding-left: 10px; }
+.acct-cut { display: flex; align-items: center; gap: 12px; font-size: 12.5px; padding: 3px 0; flex-wrap: wrap; }
+.acct-cut > span:first-child { width: 110px; }
+.acct-cut-pay { display: inline-flex; gap: 4px; align-items: center; margin-left: auto; }
+.acct-cut-pay button { background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; padding: 2px 8px; font-size: 11.5px; cursor: pointer; }
+.acct-cut-pay button:hover { border-color: #3fb950; color: #3fb950; }

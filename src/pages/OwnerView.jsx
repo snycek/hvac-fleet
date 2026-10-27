@@ -213,7 +213,7 @@ export default function OwnerView() {
   const todoCount = useMemo(() => (
     allJobs.filter(j => j.status === 'quote').length
     + expenses.filter(e => e.status === 'pending').length
-    + jobs.filter(j => j.status === 'completed' && !j.paid).length
+    + new Set(jobs.filter(j => j.status === 'completed' && !j.paid).map(lawnKey)).size
   ), [allJobs, expenses, jobs]);
 
   const kpiGroups = [

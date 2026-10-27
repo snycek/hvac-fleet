@@ -512,12 +512,31 @@ export function useDemoSim() {
 
   // Use the latest truck state (kept in the ref between renders) so trucks don't jump.
   // Payment reminder to the customer (demo: just logged on the job).
+  // Reminders are stamped on the demo's calendar (with the real time of day) so
+  // "reminded in the last 7 days" lines up with the demo date.
+  const demoNow = () => { const d = new Date(); return iso(at(addDays(worldRef.current.weekStart, worldRef.current.day), d.getHours(), d.getMinutes())); };
   const remindCustomer = useCallback(async (jobId, message) => {
     const w = worldRef.current;
-    const at = iso(Date.now());
-    const next = { ...w, jobs: w.jobs.map(j => (j.id === jobId ? { ...j, reminders: [...(j.reminders || []), { at, channel: 'text', message, delivered: false }] } : j)) };
+    const job = w.jobs.find(j => j.id === jobId);
+    const reminder = { id: `rem_${Date.now().toString(36)}`, at: demoNow(), kind: 'payment_reminder', channel: 'text', to: job?.clientPhone || '', by: 'Owner', message, delivered: false };
+    const next = { ...w, jobs: w.jobs.map(j => (j.id === jobId ? { ...j, reminders: [...(j.reminders || []), reminder] } : j)) };
     worldRef.current = next;
     setWorld(next);
+  }, []);
+  // "Remind all": items [{ jobIds, channel, message }] — one reminder per customer.
+  const remindCustomers = useCallback(async (items) => {
+    const w = worldRef.current;
+    const stampAt = demoNow();
+    const byJob = new Map();
+    items.forEach((it, n) => {
+      const first = w.jobs.find(j => j.id === it.jobIds[0]);
+      const reminder = { id: `rem_${Date.now().toString(36)}_${n}`, at: stampAt, kind: 'payment_reminder', scope: 'account', channel: it.channel, to: it.channel === 'email' ? (first?.clientEmail || '') : (first?.clientPhone || ''), by: 'Owner', message: it.message, delivered: false };
+      it.jobIds.forEach(id => byJob.set(id, reminder));
+    });
+    const next = { ...w, jobs: w.jobs.map(j => (byJob.has(j.id) ? { ...j, reminders: [...(j.reminders || []), byJob.get(j.id)] } : j)) };
+    worldRef.current = next;
+    setWorld(next);
+    return { sent: items.length };
   }, []);
 
   // Owner records a payment (cash/check, or a test card charge that can decline).
@@ -569,6 +588,7 @@ export function useDemoSim() {
     lots,
     markPaid,
     remindCustomer,
+    remindCustomers,
     payments: world.payments || [],
     cutToday: todays.filter(j => j.status === 'completed').length,
     totalToday: todays.length,

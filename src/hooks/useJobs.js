@@ -197,5 +197,20 @@ export function useJobs() {
     setJobs(prev => prev.map(j => (j.id === jobId ? data : j)));
   }, []);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer };
+  // "Remind all": one account reminder per customer; the server fills in each pay link
+  // and records it on every cut it covers. Then reload so the history shows it.
+  const remindCustomers = useCallback(async (items) => {
+    const res = await fetch('/api/reminders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't send reminders (HTTP ${res.status})`);
+    const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
+    if (Array.isArray(fresh)) setJobs(fresh);
+    return data;
+  }, []);
+
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers };
 }

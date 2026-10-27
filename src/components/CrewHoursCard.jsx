@@ -114,7 +114,7 @@ export default function CrewHoursCard({ foremanId, date, shift, crew, savedHours
           {sentAt && <div className="crew-hours-sent">✓ Sent {clock(sentAt)} — the owner sees these on Payroll.</div>}
         </>
       )}
-      {!crew.length && <p className="crew-hours-empty">No crew on file yet — the owner adds cutters on the Crew & Payroll tab.</p>}
+      {!crew.length && <p className="crew-hours-empty">No crew on file yet — the owner adds your crew on the Crew & Payroll tab.</p>}
       {error && <div className="crew-hours-error">{error}</div>}
     </section>
   );

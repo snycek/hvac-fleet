@@ -521,10 +521,42 @@ app.post('/api/jobs/:id/remind', (req, res) => {
   if (job.status !== 'completed' || job.paid) return res.status(400).json({ error: 'only unpaid finished cuts get reminders' });
   const channel = ['text', 'email'].includes(req.body?.channel) ? req.body.channel : 'text';
   const message = String(req.body?.message || '').slice(0, 500);
-  const reminder = { at: new Date().toISOString(), channel, message, delivered: false };
+  const to = channel === 'email' ? (job.clientEmail || job.email || '') : (job.clientPhone || '');
+  const reminder = { id: `rem_${Date.now().toString(36)}_${idx}`, at: new Date().toISOString(), kind: 'payment_reminder', channel, to, by: 'Owner', message, delivered: false };
   jobs[idx] = { ...job, reminders: [...(job.reminders || []), reminder] };
   console.log(`[REMIND] ${channel} → ${job.clientName} ${job.clientPhone || ''}: ${message}`);
   return res.json(jobs[idx]);
+});
+
+// "Remind all": one reminder per customer covering all their open cuts. {payLink} in the
+// message becomes that customer's own account link. Recorded on every cut it covers
+// (same id), so the customer's contact history shows it once with the exact wording.
+// (Texting/email isn't connected yet — delivered stays false until it is.)
+app.post('/api/reminders', (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 500) : [];
+  const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
+  const at = new Date().toISOString();
+  const sent = [];
+  items.forEach((item, n) => {
+    const ids = (Array.isArray(item.jobIds) ? item.jobIds : []).filter((id) => {
+      const j = jobs.find((x) => x.id === id);
+      return j && j.status === 'completed' && !j.paid;
+    });
+    if (!ids.length) return;
+    const first = jobs.find((x) => x.id === ids[0]);
+    const channel = ['text', 'email'].includes(item.channel) ? item.channel : 'text';
+    const to = channel === 'email' ? (first.clientEmail || first.email || '') : (first.clientPhone || '');
+    const link = `${origin}/pay/${portalToken(lawnKey(first))}`;
+    const message = String(item.message || '').slice(0, 600).replace('{payLink}', link);
+    const reminder = { id: `rem_${Date.now().toString(36)}_${n}`, at, kind: 'payment_reminder', scope: 'account', channel, to, by: 'Owner', message, delivered: false };
+    for (const id of ids) {
+      const idx = jobs.findIndex((x) => x.id === id);
+      jobs[idx] = { ...jobs[idx], reminders: [...(jobs[idx].reminders || []), reminder] };
+    }
+    console.log(`[REMIND] ${channel} → ${first.clientName} ${to}: ${message}`);
+    sent.push({ id: reminder.id, customer: first.clientName, jobIds: ids });
+  });
+  res.json({ sent: sent.length, items: sent });
 });
 
 // ---- Expenses (gas, maintenance, other) ----
@@ -711,7 +743,7 @@ const cleanEmployee = (body, base = {}) => {
   if (body.name !== undefined) out.name = String(body.name).trim().slice(0, 60);
   if (body.rate !== undefined) out.rate = Math.max(0, Math.min(500, Math.round(Number(body.rate) * 100) / 100 || 0));
   if (body.crewId !== undefined && technicians.some((t) => t.id === body.crewId)) out.crewId = body.crewId;
-  if (body.role !== undefined && ['foreman', 'cutter'].includes(body.role)) out.role = body.role;
+  if (body.role !== undefined && ['foreman', 'cutter', 'shoveler'].includes(body.role)) out.role = body.role;
   if (body.active !== undefined) out.active = Boolean(body.active);
   return out;
 };

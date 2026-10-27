@@ -61,12 +61,15 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
         const people = employees.filter(e => e.crewId === crew.id && e.active !== false);
         const foreman = people.find(e => e.role === 'foreman');
         const cutters = people.filter(e => e.role !== 'foreman');
+        // Plow trucks: a driver plus shovelers (mowers: a foreman plus cutters).
+        const plow = crew.kind === 'plow';
+        const helper = plow ? 'shoveler' : 'cutter';
         const form = adding[crew.id] || { name: '', rate: '16' };
         const setForm = patch => setAdding(a => ({ ...a, [crew.id]: { ...form, ...patch } }));
         const submit = async e => {
           e.preventDefault();
           if (!form.name.trim()) return;
-          await onAdd({ name: form.name.trim(), rate: Number(form.rate) || 15, crewId: crew.id, role: 'cutter' });
+          await onAdd({ name: form.name.trim(), rate: Number(form.rate) || 15, crewId: crew.id, role: helper });
           setAdding(a => ({ ...a, [crew.id]: { name: '', rate: form.rate } }));
         };
         return (
@@ -87,7 +90,7 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
                       onKeyDown={ev => { if (ev.key === 'Enter') ev.currentTarget.blur(); if (ev.key === 'Escape') setEditingName(null); }} />
                   ) : (
                     <button type="button" className="roster-name" onClick={() => setEditingName(e.id)} title="Rename">
-                      {e.name}{e.role === 'foreman' && <span className="role-chip">Foreman</span>}
+                      {e.name}{e.role === 'foreman' && <span className="role-chip">{plow ? 'Driver' : 'Foreman'}</span>}
                     </button>
                   )}
                   <RateInput value={e.rate} label={`${e.name} hourly rate`} onSave={rate => onUpdate(e.id, { rate })} />
@@ -105,8 +108,8 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
               ))}
             </ul>
             <form className="roster-add" onSubmit={submit}>
-              <input placeholder="Add cutter…" value={form.name} onChange={e => setForm({ name: e.target.value })} aria-label={`New cutter for ${crew.name}`} />
-              <span className="pay-rate">$<input inputMode="decimal" value={form.rate} onChange={e => setForm({ rate: e.target.value.replace(/[^\d.]/g, '') })} aria-label="New cutter rate" /></span>
+              <input placeholder={`Add ${helper}…`} value={form.name} onChange={e => setForm({ name: e.target.value })} aria-label={`New ${helper} for ${crew.name}`} />
+              <span className="pay-rate">$<input inputMode="decimal" value={form.rate} onChange={e => setForm({ rate: e.target.value.replace(/[^\d.]/g, '') })} aria-label={`New ${helper} rate`} /></span>
               <button type="submit" className="btn-primary" disabled={!form.name.trim()}>Add</button>
             </form>
           </section>
@@ -213,7 +216,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
                 return (
                   <Fragment key={crew.id}>
                     <tr className="crew-row">
-                      <td colSpan={2}>🚜 {crew.name}'s crew <span>· {crew.truckName || 'Truck'} · {crewRows.length}</span></td>
+                      <td colSpan={2}>{crew.kind === 'plow' ? '❄️' : '🚜'} {crew.name}'s crew <span>· {crew.truckName || 'Truck'} · {crewRows.length}</span></td>
                       {week.map(d => <td key={d} />)}
                       <td>{fmtHours(Math.round(crewHours * 4) / 4)}</td>
                       <td />
@@ -224,7 +227,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
                       <tr key={r.employee.id} className={r.paidAt ? 'is-paid' : undefined}>
                         <td className="left">
                           <span className="pay-name">{r.employee.name}</span>
-                          {r.employee.role === 'foreman' && <span className="role-chip">Foreman</span>}
+                          {r.employee.role === 'foreman' && <span className="role-chip">{crew.kind === 'plow' ? 'Driver' : 'Foreman'}</span>}
                         </td>
                         <td><RateInput value={r.employee.rate} label={`${r.employee.name} rate`} onSave={rate => updateEmployee(r.employee.id, { rate })} /></td>
                         {r.days.map(day => (

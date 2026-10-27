@@ -4,6 +4,7 @@ import { receiptUrl } from '../hooks/useExpenses.js';
 import { MANUAL_EXPENSE_TYPES, PAST_DUE_DAYS, daysSinceCut, expenseType, isPastDue, money, reminderMessage, shortDate } from '../lib/lawns.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { METHODS, TEST_CARDS } from '../lib/payments.js';
+import { REMIND_GAP_DAYS, pastDueCustomers } from '../lib/customers.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
@@ -68,7 +69,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, today = todayString(), bare = false }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, today = todayString(), bare = false }) {
   const [paying, setPaying] = useState(null);
   const [showAllUnpaid, setShowAllUnpaid] = useState(false);
   const UNPAID_PREVIEW = 5;
@@ -86,6 +87,20 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     try { await markPaid(job.id, true, method, last4); } finally { setPaying(null); setChoosing(null); }
   };
   const [reminding, setReminding] = useState(null);
+  // "Remind all 30+ days": one reminder per customer, skipping anyone reminded this week.
+  const behind = pastDueCustomers(jobs, today);
+  const toRemind = behind.filter(c => !c.recentlyReminded);
+  const [bulk, setBulk] = useState({ open: false, busy: false, done: '' });
+  const remindAll = async () => {
+    setBulk(b => ({ ...b, busy: true }));
+    try {
+      await remindAccounts(toRemind);
+      setBulk({ open: false, busy: false, done: `✓ Reminded ${toRemind.length} customer${toRemind.length === 1 ? '' : 's'} — logged in each one's contact history` });
+    } catch (e) { setBulk({ open: true, busy: false, done: e.message }); }
+  };
+  const Addr = ({ job }) => (openCustomer
+    ? <button type="button" className="addr-link" onClick={() => openCustomer(job)} title="Payment & contact history">{String(job.address || '').split(',')[0]}</button>
+    : <span style={{ fontWeight: 600 }}>{String(job.address || '').split(',')[0]}</span>);
   const remind = async (job) => {
     setReminding(job.id);
     try { await remindCustomer(job.id, reminderMessage(job, COMPANY_INFO.name)); } finally { setReminding(null); }
@@ -128,7 +143,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 <div key={job.id} className="unpaid-row problem" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 170px', minWidth: 0 }}>
                     <span aria-hidden="true">❌ </span>
-                    <span style={{ fontWeight: 600 }}>{String(job.address || '').split(',')[0]}</span>
+                    <Addr job={job} />
                     <span style={{ color: 'var(--text-muted)' }}> · {job.clientName}</span>
                     <div style={{ fontSize: '12px', color: '#ff7b72' }}>
                       {job.paymentIssue.brand || 'Card'} ••{job.paymentIssue.last4 || '----'} · {job.paymentIssue.reason} · {shortDate(job.paymentIssue.at)}
@@ -151,6 +166,27 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               Unpaid · {unpaid.length} · {money(unpaidTotal)}
               {pastDue.length > 0 && <span className="past-due-count" title={`${pastDue.length} cut${pastDue.length === 1 ? '' : 's'} unpaid ${PAST_DUE_DAYS}+ days`}> · ⚠️ {pastDue.length} past {PAST_DUE_DAYS} days</span>}
             </h3>
+            {remindAccounts && behind.length > 0 && (
+              <div className="remind-all">
+                <button type="button" className="btn-ghost remind-btn" disabled={!toRemind.length || bulk.busy} onClick={() => setBulk({ open: !bulk.open, busy: false, done: '' })}
+                  title={toRemind.length ? 'One reminder per customer, with their pay link' : `Everyone 30+ days behind was reminded in the last ${REMIND_GAP_DAYS} days`}>
+                  🔔 Remind all {PAST_DUE_DAYS}+ days ({toRemind.length})
+                </button>
+                {behind.length > toRemind.length && <span className="cust-dim">{behind.length - toRemind.length} reminded in the last {REMIND_GAP_DAYS} days — skipped</span>}
+                {bulk.done && <span className="remind-done">{bulk.done}</span>}
+                {bulk.open && toRemind.length > 0 && (
+                  <div className="remind-confirm">
+                    <div><b>Send a payment reminder to {toRemind.length} customer{toRemind.length === 1 ? '' : 's'}</b> ({money(toRemind.reduce((s, c) => s + c.balance, 0))} owed)?</div>
+                    <div className="cust-dim">{toRemind.slice(0, 6).map(c => `${c.name} (${money(c.balance)})`).join(' · ')}{toRemind.length > 6 ? ` · +${toRemind.length - 6} more` : ''}</div>
+                    <div className="remind-preview">Each gets their own total and pay link, e.g.: “Hi {String(toRemind[0].name).split(' ')[0]}, … your account has {money(toRemind[0].balance)} open … Pay anytime here: [their link]”</div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button type="button" className="btn-primary" disabled={bulk.busy} onClick={remindAll} style={{ padding: '5px 14px', fontSize: '12px' }}>{bulk.busy ? 'Sending…' : `Send ${toRemind.length}`}</button>
+                      <button type="button" className="btn-ghost" onClick={() => setBulk({ open: false, busy: false, done: '' })} style={{ padding: '5px 12px', fontSize: '12px' }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               {(showAllUnpaid ? unpaid : unpaid.slice(0, UNPAID_PREVIEW)).map((job, i) => {
                 const days = daysSinceCut(job, today);
@@ -160,7 +196,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 <div key={job.id} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 170px', minWidth: 0 }}>
                     {late && <span className="yield" role="img" aria-label={`${days} days past due`} title={`${days} days past due`}>⚠️</span>}
-                    <span style={{ fontWeight: 600 }}>{String(job.address || '').split(',')[0]}</span>
+                    <Addr job={job} />
                     <span style={{ color: 'var(--text-muted)' }}> · {job.clientName}</span>
                     {lastReminder && (
                       <span className="reminded" title={lastReminder.message}> · 🔔 {shortDate(lastReminder.at)}{job.reminders.length > 1 ? ` ×${job.reminders.length}` : ''}</span>

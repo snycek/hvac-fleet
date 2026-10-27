@@ -8,7 +8,7 @@ const td = { padding: '10px 12px', whiteSpace: 'nowrap' };
 
 /** Every lawn at a glance: numbers only. Tap a row for its payment history. */
 // bare: no title (the hub panel shows its own) and no outer card.
-function LawnsPanel({ jobs, markPaid, today, bare = false }) {
+function LawnsPanel({ jobs, markPaid, today, openCustomer, bare = false }) {
   const [open, setOpen] = useState(null);
   const lawns = allLawns(jobs).sort((a, b) => (b.owed - a.owed) || (b.cuts - a.cuts));
 
@@ -46,6 +46,7 @@ function LawnsPanel({ jobs, markPaid, today, bare = false }) {
                       <td colSpan={7} style={{ padding: '10px 14px 14px' }}>
                         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px' }}>
                           <span>📞 {l.phone}</span>
+                          {openCustomer && <button type="button" className="addr-link" onClick={e => { e.stopPropagation(); openCustomer(l.key); }}>📇 Payments & contact history</button>}
                           {l.price != null && <span>💲{l.price}/cut</span>}
                           {l.repeatDays > 0 && <span>🔁 {repeatLabel(l.repeatDays)}</span>}
                           {l.sqFt && <span>📐 {formatSqFt(l.sqFt)}</span>}

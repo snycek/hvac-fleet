@@ -17,10 +17,13 @@ import ActivityFeed from '../components/ActivityFeed.jsx';
 import CollapseButton from '../components/CollapseButton.jsx';
 import PayrollView from '../components/PayrollView.jsx';
 import PrintInvoices from '../components/PrintInvoices.jsx';
+import CustomerCard from '../components/CustomerCard.jsx';
+import { accountReminder } from '../lib/customers.js';
+import { COMPANY_INFO } from '../data/services.js';
 import { demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
 import { formatDay, todayString } from '../lib/dates.js';
-import { hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
+import { dayOf, hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
 
 // Stable no-op so memoized panels don't re-render in demo mode.
 const noop = async () => {};
@@ -81,6 +84,7 @@ export default function OwnerView() {
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [printing, setPrinting] = useState(null); // { title, items } for the invoice preview
   const [printMenu, setPrintMenu] = useState(false);
+  const [customerKey, setCustomerKey] = useState(null); // customer card open for this address
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const toggle = id => setCollapsed(c => {
     const next = { ...c, [id]: !c[id] };
@@ -97,6 +101,7 @@ export default function OwnerView() {
   const expenses      = demoOn ? sim.expenses : liveExpenses.expenses;
   const markPaid      = demoOn ? sim.markPaid : live.markPaid;
   const remindCustomer = demoOn ? sim.remindCustomer : live.remindCustomer;
+  const remindCustomersFn = demoOn ? sim.remindCustomers : live.remindCustomers;
   const scheduleJob   = demoOn ? noop : live.scheduleJob;
   const declineJob    = demoOn ? noop : live.declineJob;
   const addExpense    = demoOn ? noop : liveExpenses.addExpense;
@@ -145,6 +150,30 @@ export default function OwnerView() {
     }
     setPrinting({ title, items });
   };
+  // Demo pay link for a customer (the link carries their open visits).
+  const demoPayLink = job => {
+    const invoice = invoiceFor(allJobs, job, today);
+    const open = [...invoice.previous, ...(invoice.current.paid ? [] : [invoice.current])];
+    return `${window.location.origin}/pay/demo#${demoAccountHash({ customer: invoice.customer, open, asOf: today })}`;
+  };
+  // Account reminders, one per customer: [{ name, address, email, jobs, balance, oldestDate }].
+  const remindAccounts = async customers => {
+    const items = customers.map(c => {
+      const latest = c.jobs[c.jobs.length - 1];
+      const message = accountReminder(c, COMPANY_INFO.name);
+      return { jobIds: c.jobs.map(j => j.id), channel: c.email ? 'email' : 'text', message: demoOn ? message.replace('{payLink}', demoPayLink(latest)) : message };
+    });
+    return remindCustomersFn(items);
+  };
+  // Open cuts for one customer, shaped for remindAccounts.
+  const openAccount = key => {
+    const jobsOpen = allJobs.filter(j => lawnKey(j) === key && j.status === 'completed' && !j.paid)
+      .sort((a, b) => String(a.completedAt).localeCompare(String(b.completedAt)));
+    const latest = jobsOpen[jobsOpen.length - 1] || allJobs.find(j => lawnKey(j) === key);
+    return { key, name: latest?.clientName, address: latest?.address, email: latest?.clientEmail || latest?.email || '', phone: latest?.clientPhone || '', jobs: jobsOpen, balance: jobsOpen.reduce((s, j) => s + (j.earnings || 0), 0), oldestDate: String(jobsOpen[0]?.completedAt || '').slice(0, 10) };
+  };
+  const openCustomer = job => setCustomerKey(lawnKey(job));
+
   // Today's visits for one truck (route order) or every truck.
   const todaysVisits = techId => jobs
     .filter(j => jobDay(j, today) === today && j.status !== 'quote' && (!techId || j.assignedTo === techId))
@@ -169,6 +198,10 @@ export default function OwnerView() {
       totalToday: todays.length,
       leftToday: todays.length - done.length,
       billedToday: done.reduce((s, j) => s + (j.earnings || 0), 0),
+      // Money actually brought in today (anything marked paid today: cash, check, card, QR).
+      // Everything cut this month (paid or not).
+      billedMonth: (() => { const r = periodRange('month', today); return jobs.filter(j => j.status === 'completed' && jobDay(j, today) >= r.from && jobDay(j, today) <= r.to).reduce((s, j) => s + (j.earnings || 0), 0); })(),
+      collectedToday: jobs.filter(j => j.paid && dayOf(j.paidAt) === today).reduce((s, j) => s + (j.earnings || 0), 0),
       onDuty: crew.filter(t => ['available', 'busy', 'en_route'].includes(t.status)).length,
       crewSize: crew.length,
       lawns: new Set(jobs.map(lawnKey)).size,
@@ -187,11 +220,12 @@ export default function OwnerView() {
     { title: 'Today', tiles: [
       { label: 'Cut', value: `${stats.cutToday}/${stats.totalToday}` },
       { label: 'Left', value: stats.leftToday },
-      { label: 'Billed', value: money(stats.billedToday), color: '#3fb950' },
+      { label: 'Billed', value: money(stats.billedToday) },
+      { label: 'Collected', value: money(stats.collectedToday), color: '#3fb950' },
     ] },
     { title: 'This month', tiles: [
-      { label: 'Income', value: money(stats.month.incomeTotal), color: '#3fb950' },
-      { label: 'Owed', value: money(stats.month.owedTotal), color: '#f0b429' },
+      { label: 'Billed', value: money(stats.billedMonth) },
+      { label: 'Collected', value: money(stats.month.incomeTotal), color: '#3fb950' },
       { label: 'Expenses', value: money(stats.month.expenseTotal) },
       { label: 'Net', value: money(stats.month.net), color: stats.month.net >= 0 ? '#3fb950' : '#ff7b72' },
     ] },
@@ -219,9 +253,10 @@ export default function OwnerView() {
             <button type="button" role="tab" aria-selected={view === 'payroll'} onClick={() => setView('payroll')}>👷 Crew & Payroll</button>
           </div>
         </div>
-        <div className="dash-kpis">
+        {/* On phones/tablets the Crew numbers live on the Crew & Payroll tab, not the Hub. */}
+        <div className={`dash-kpis view-${view}`}>
           {kpiGroups.map(g => (
-            <div key={g.title} className="kpi-group" style={{ flexGrow: g.tiles.length }}>
+            <div key={g.title} className={g.title === 'Crew' ? 'kpi-group kpi-crew' : 'kpi-group'} style={{ flexGrow: g.tiles.length }}>
               <div className="kpi-group-title">{g.title}</div>
               <div className="kpi-row" style={{ gridTemplateColumns: `repeat(${g.tiles.length}, minmax(0, 1fr))` }}>
                 {g.tiles.map(k => <Kpi key={k.label} {...k} />)}
@@ -275,6 +310,14 @@ export default function OwnerView() {
         </div>
       )}
 
+      {customerKey && (
+        <CustomerCard
+          customerKey={customerKey} jobs={allJobs} payments={payments} today={today}
+          onClose={() => setCustomerKey(null)}
+          onRemind={() => remindAccounts([openAccount(customerKey)])}
+          onPrint={() => { const a = openAccount(customerKey); if (a.jobs.length) printInvoices([a.jobs[a.jobs.length - 1]], `Invoice · ${a.name}`); }}
+        />
+      )}
       {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
       {view === 'payroll' ? (
         <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
@@ -298,6 +341,7 @@ export default function OwnerView() {
                   scheduleJob={scheduleJob} declineJob={declineJob} markPaid={markPaid}
                   logExpense={logExpense} rejectExpense={rejectExpense}
                   remindCustomer={remindCustomer} today={today}
+                  remindAccounts={remindAccounts} openCustomer={openCustomer}
                   // From Unpaid: print off their latest unpaid cut so every older one shows as balance.
                   printInvoice={job => {
                     const latest = allJobs.filter(j => lawnKey(j) === lawnKey(job) && j.status === 'completed' && !j.paid)
@@ -306,7 +350,7 @@ export default function OwnerView() {
                   }}
                 />
               ) : (
-                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} />
+                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} openCustomer={key => setCustomerKey(key)} />
               )}
             </div>}
           </section>

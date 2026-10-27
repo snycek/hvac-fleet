@@ -581,3 +581,46 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .portal-pay:disabled { opacity: 0.6; }
 .portal-contact { text-align: center; color: #5b6470; font-size: 14px; }
 .portal-contact a { color: #1f6b2b; font-weight: 700; }
+
+/* Address → customer card */
+.addr-link { background: none; border: none; padding: 0; font: inherit; font-weight: 600; color: var(--text-primary); text-decoration: underline dotted #8b949e; text-underline-offset: 3px; cursor: pointer; }
+.addr-link:hover { color: #58a6ff; text-decoration-color: #58a6ff; }
+.remind-all { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: -2px 0 8px; font-size: 12px; }
+.remind-done { color: #3fb950; font-weight: 600; }
+.remind-confirm { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; background: var(--bg-elevated); border: 1px solid #f0b42955; border-radius: 8px; padding: 10px 12px; font-size: 13px; }
+.remind-preview { font-size: 12px; color: var(--text-muted); font-style: italic; }
+.cust-backdrop { position: fixed; inset: 0; z-index: 2500; background: #000a; display: flex; justify-content: flex-end; }
+.cust-card { width: min(560px, 100%); height: 100%; background: var(--bg-secondary, #161b22); border-left: 1px solid var(--border); display: flex; flex-direction: column; color: var(--text-primary); box-shadow: -12px 0 40px #0008; }
+.cust-head { display: flex; gap: 12px; justify-content: space-between; padding: 16px 18px 10px; }
+.cust-name { font-size: 19px; font-weight: 800; }
+.cust-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+.cust-sub a { color: var(--text-primary); }
+.cust-x { padding: 4px 10px; height: fit-content; }
+.cust-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 0 18px 10px; }
+.cust-stats div { background: var(--bg-elevated); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.cust-stats b { font-size: 16px; }
+.cust-stats span { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px; }
+.cust-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 0 18px 10px; }
+.cust-actions .btn-ghost { padding: 5px 12px; font-size: 12.5px; }
+.cust-note { font-size: 12px; color: #3fb950; }
+.cust-tabs { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--border); }
+.cust-tabs button { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); padding: 8px 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cust-tabs button[aria-selected="true"] { color: var(--text-primary); border-bottom-color: #3fb950; }
+.cust-body { flex: 1; overflow: auto; padding: 12px 18px 24px; }
+.cust-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.cust-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); padding: 6px 4px; border-bottom: 1px solid var(--border); }
+.cust-table td { padding: 7px 4px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.cust-ok { color: #3fb950; font-weight: 600; }
+.cust-bad { color: #ff7b72; font-weight: 600; }
+.cust-warn { color: #f0b429; font-weight: 600; }
+.cust-dim { color: var(--text-muted); font-size: 12px; }
+.cust-empty { color: var(--text-muted); padding: 24px 0; text-align: center; }
+.cust-log { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.cust-log li { background: var(--bg-elevated); border-radius: 8px; padding: 10px 12px; font-size: 13px; display: flex; flex-direction: column; gap: 6px; }
+.cust-log-head { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.cust-msg { background: var(--bg-primary); border-left: 3px solid #58a6ff; padding: 8px 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; }
+
+/* Phones/tablets: Crew numbers only on the Crew & Payroll tab */
+@media not all and (min-width: 1200px) and (min-height: 700px) {
+  .dash-kpis.view-hub .kpi-crew { display: none; }
+}

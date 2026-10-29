@@ -212,5 +212,32 @@ export function useJobs() {
     return data;
   }, []);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers };
+  // Monthly statements: items [{ jobIds, period, periodLabel, channel, message }].
+  const sendStatements = useCallback(async (items) => {
+    const res = await fetch('/api/statements/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't send statements (HTTP ${res.status})`);
+    const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
+    if (Array.isArray(fresh)) setJobs(fresh);
+    return data;
+  }, []);
+
+  // A customer's billing preferences (contactPref, billing), saved on all their visits.
+  const updateCustomer = useCallback(async (key, patch) => {
+    const res = await fetch('/api/customers', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, ...patch }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save (HTTP ${res.status})`);
+    const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
+    if (Array.isArray(fresh)) setJobs(fresh);
+  }, []);
+
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer };
 }

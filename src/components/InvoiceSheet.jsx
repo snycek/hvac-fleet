@@ -10,7 +10,11 @@ const shortDate = d => new Date(`${d}T12:00:00`).toLocaleDateString('en-US', { m
  * customer's account so they can pay by card; cash/check still welcome.
  */
 export default function InvoiceSheet({ invoice, qr, payUrl, crew }) {
-  const { customer, current, previous, previousTotal, total } = invoice;
+  const { customer, previous, previousTotal, total } = invoice;
+  // A monthly statement lists every visit that month; a door invoice has one visit.
+  const statement = invoice.kind === 'statement';
+  const current = statement ? null : invoice.current;
+  const monthLines = statement ? invoice.lines : [current];
   const site = payUrl ? new URL(payUrl).host : '';
   // Keep it to one page: list the 6 most recent unpaid visits, sum up the rest.
   const SHOW = 6;
@@ -29,11 +33,11 @@ export default function InvoiceSheet({ invoice, qr, payUrl, crew }) {
           </div>
         </div>
         <div className="inv-meta">
-          <div className="inv-title">INVOICE</div>
+          <div className="inv-title">{statement ? 'STATEMENT' : 'INVOICE'}</div>
           <table>
             <tbody>
-              <tr><th>Invoice #</th><td>{invoice.invoiceNo}</td></tr>
-              <tr><th>Invoice date</th><td>{longDate(invoice.invoiceDate)}</td></tr>
+              <tr><th>{statement ? 'Statement #' : 'Invoice #'}</th><td>{invoice.invoiceNo}</td></tr>
+              <tr><th>{statement ? 'Statement date' : 'Invoice date'}</th><td>{longDate(invoice.invoiceDate)}</td></tr>
               <tr><th>Due date</th><td><b>{longDate(invoice.dueDate)}</b></td></tr>
             </tbody>
           </table>
@@ -47,24 +51,34 @@ export default function InvoiceSheet({ invoice, qr, payUrl, crew }) {
           <div>{customer.address}</div>
           {customer.phone && <div>{customer.phone}</div>}
         </div>
-        <div>
-          <div className="inv-label">This visit</div>
-          <div className="inv-strong">{formatDay(current.date)}</div>
-          {crew && <div>Your crew: {crew}</div>}
-        </div>
+        {statement ? (
+          <div>
+            <div className="inv-label">Service period</div>
+            <div className="inv-strong">{invoice.periodLabel}</div>
+            <div>{monthLines.length} visit{monthLines.length === 1 ? '' : 's'}</div>
+          </div>
+        ) : (
+          <div>
+            <div className="inv-label">This visit</div>
+            <div className="inv-strong">{formatDay(current.date)}</div>
+            {crew && <div>Your crew: {crew}</div>}
+          </div>
+        )}
       </section>
 
       <table className="inv-lines">
         <thead>
-          <tr><th>Date</th><th>Description</th><th>Invoice #</th><th className="num">Amount</th></tr>
+          <tr><th>Date</th><th>Description</th><th>Ref #</th><th className="num">Amount</th></tr>
         </thead>
         <tbody>
-          <tr>
-            <td>{shortDate(current.date)}</td>
-            <td>{current.service}{current.paid ? ' — paid, thank you' : ''}</td>
-            <td>{current.invoiceNo}</td>
-            <td className="num">{usd(current.amount)}</td>
-          </tr>
+          {monthLines.map(l => (
+            <tr key={l.id}>
+              <td>{shortDate(l.date)}</td>
+              <td>{l.service}{l.paid ? ' — paid, thank you' : ''}</td>
+              <td>{l.invoiceNo}</td>
+              <td className="num">{usd(l.amount)}</td>
+            </tr>
+          ))}
           {previous.length > 0 && (
             <tr className="inv-sub"><td colSpan={4}>Previous balance — earlier visits not yet paid</td></tr>
           )}
@@ -88,7 +102,9 @@ export default function InvoiceSheet({ invoice, qr, payUrl, crew }) {
       </table>
 
       <div className="inv-totals">
-        <div><span>This visit</span><span>{current.paid ? 'Paid' : usd(current.amount)}</span></div>
+        {statement
+          ? <div><span>{invoice.periodLabel.split(' ')[0]} services</span><span>{usd(invoice.open)}</span></div>
+          : <div><span>This visit</span><span>{current.paid ? 'Paid' : usd(current.amount)}</span></div>}
         {previous.length > 0 && <div><span>Previous balance</span><span>{usd(previousTotal)}</span></div>}
         <div className="inv-total"><span>Total due</span><span>{usd(total)}</span></div>
       </div>
@@ -110,7 +126,7 @@ export default function InvoiceSheet({ invoice, qr, payUrl, crew }) {
       </section>
 
       <footer className="inv-foot">
-        Thank you for your business! Questions about this invoice? Call or text {COMPANY_INFO.phone}.
+        Thank you for your business! Questions about this {statement ? 'statement' : 'invoice'}? Call or text {COMPANY_INFO.phone}.
       </footer>
     </article>
   );

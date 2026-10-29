@@ -29,7 +29,7 @@ export default function PrintInvoices({ items, title, onClose }) {
     <div className="print-root" role="dialog" aria-label={title}>
       <div className="print-toolbar">
         <b>🖨 {title}</b>
-        <span>{items.length} invoice{items.length === 1 ? '' : 's'} · one per page</span>
+        <span>{items.length} {items[0]?.invoice.kind === 'statement' ? 'statement' : 'invoice'}{items.length === 1 ? '' : 's'} · one per page</span>
         <span style={{ flex: 1 }} />
         <button type="button" className="btn-primary" disabled={!ready} onClick={() => window.print()}>{ready ? 'Print' : 'Making QR codes…'}</button>
         <button type="button" className="btn-ghost" onClick={onClose}>Close</button>

@@ -65,7 +65,7 @@ function TruckCard({ tech, route, selected, onSelect }) {
       {/* Two numbers: lawns cut of today's total, and what's been billed (avg cut lives in Crew Report) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
         <Num value={`${route.done}/${route.left}`} label={plow ? 'Plowed/Left' : 'Cut/Left'} color={route.left ? 'var(--text-primary)' : '#3fb950'} />
-        <Num value={money(route.billed)} label="Billed" color="#3fb950" />
+        <Num value={money(route.billed)} label="Earned" color="#3fb950" />
       </div>
 
       {/* Progress bar + one dot per stop in route order */}

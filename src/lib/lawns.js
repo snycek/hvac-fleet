@@ -184,17 +184,7 @@ export function averageClock(isoTimes) {
 }
 
 // ---- Collections ----
-export const PAST_DUE_DAYS = 30;
-
-// Whole days since the cut was finished (by local date), as of `today`.
-export function daysSinceCut(job, today = todayString()) {
-  if (!job.completedAt) return 0;
-  const cut = new Date(`${dayOf(job.completedAt)}T12:00:00`);
-  const now = new Date(`${today}T12:00:00`);
-  return Math.max(0, Math.round((now - cut) / 86400000));
-}
-
-export const isPastDue = (job, today) => job.status === 'completed' && !job.paid && daysSinceCut(job, today) >= PAST_DUE_DAYS;
+// When a bill is due and how late it is: see invoices.js (dueDateFor, daysPastDue).
 
 // Friendly payment reminder the customer gets.
 export function reminderMessage(job, companyName) {

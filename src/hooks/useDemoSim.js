@@ -214,11 +214,21 @@ function lotOutline(lot) {
   return outlineCache.get(key);
 }
 
+// Demo contact preferences: most customers get texts; every 4th prefers email, every
+// 9th wants paper (made-up example.com addresses, never real ones).
+const demoEmail = name => `${String(name).toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/ +/g, '.')}@example.com`;
+function demoContact(n, name) {
+  if (n % 9 === 0) return { contactPref: 'paper' };
+  if (n % 4 === 0) return { clientEmail: demoEmail(name), contactPref: 'email' };
+  return {};
+}
+
 function baseJob(lawn) {
   return {
     service: 'Lawn Cutting',
     clientName: lawn.name,
     clientPhone: `(313) 555-${String(1000 + Number(lawn.id.slice(3))).slice(-4)}`,
+    ...demoContact(Number(lawn.id.slice(3)), lawn.name),
     address: lawn.address,
     location: { lat: lawn.lat, lng: lawn.lng },
     assignedTo: FOREMEN[lawn.truck].id,
@@ -235,6 +245,8 @@ function lotJob(lot) {
     kind: 'plow',
     clientName: lot.name,
     clientPhone: `(313) 555-${String(2000 + Number(lot.id.slice(4))).slice(-4)}`,
+    clientEmail: `billing@${String(lot.name).toLowerCase().replace(/[^a-z]+/g, '')}.example.com`,
+    contactPref: 'email',
     address: lot.address,
     location: { lat: lot.lat, lng: lot.lng },
     assignedTo: PLOWS[lot.truck].id,
@@ -251,6 +263,7 @@ function lotJob(lot) {
 function jobsForDay(date, day, trucks, w = null) {
   const lawns = isWinter(date) ? [] : Array.from({ length: trucks }, (_, t) => routeFor(w?.custom, day, t, date)).flatMap(route => route.stops.map(id => ({
     ...baseJob(stopById(id, w)),
+    ...(w?.prefs?.[id] || {}),
     id: `${id}@${date}`,
     status: 'assigned',
     scheduledDate: date,
@@ -258,6 +271,7 @@ function jobsForDay(date, day, trucks, w = null) {
   })));
   const lots = isSnowDay(date) ? PLOW_ROUTES.flatMap(route => route.stops.map(id => ({
     ...lotJob(lotById[id]),
+    ...(w?.prefs?.[id] || {}),
     id: `${id}@${date}`,
     status: 'assigned',
     scheduledDate: date,
@@ -685,6 +699,37 @@ export function useDemoSim() {
     return { sent: items.length };
   }, []);
 
+  // Monthly statements: items [{ jobIds, period, periodLabel, channel, message }] — logged
+  // on every visit they cover, stamped on the demo calendar.
+  const sendStatements = useCallback(async (items) => {
+    const w = worldRef.current;
+    const stampAt = demoNow();
+    const byJob = new Map();
+    items.forEach((it, n) => {
+      const first = w.jobs.find(j => j.id === it.jobIds[0]);
+      const to = it.channel === 'email' ? (first?.clientEmail || '') : it.channel === 'text' ? (first?.clientPhone || '') : '';
+      const record = { id: `stm_${Date.now().toString(36)}_${n}`, at: stampAt, kind: 'statement', period: it.period, periodLabel: it.periodLabel, scope: 'account', channel: it.channel, to, by: 'Owner', message: it.channel === 'paper' ? '' : it.message, delivered: false };
+      it.jobIds.forEach(id => byJob.set(id, record));
+    });
+    commitWorld({ ...w, jobs: w.jobs.map(j => (byJob.has(j.id) ? { ...j, reminders: [...(j.reminders || []), byJob.get(j.id)] } : j)) });
+    return { sent: items.length };
+  }, [commitWorld]);
+
+  // Customer billing preferences (contactPref, billing): on every visit at the address,
+  // and remembered for the visits the demo makes later.
+  const updateCustomer = useCallback(async (key, patch) => {
+    const w = worldRef.current;
+    const stops = new Set();
+    const jobs = w.jobs.map(j => {
+      if (lawnKey(j) !== key) return j;
+      if (j.lawnId || j.lotId) stops.add(j.lawnId || j.lotId);
+      return { ...j, ...patch };
+    });
+    const prefs = { ...(w.prefs || {}) };
+    for (const id of stops) prefs[id] = { ...(prefs[id] || {}), ...patch };
+    commitWorld({ ...w, jobs, prefs });
+  }, [commitWorld]);
+
   // ---- New customers from quotes ----
   // Every weekday × truck, with the best spot for this address, cheapest first.
   const planRoutes = useCallback(job => {
@@ -814,6 +859,9 @@ export function useDemoSim() {
     markPaid,
     remindCustomer,
     remindCustomers,
+    sendStatements,
+    updateCustomer,
+    start: world.start,
     planRoutes,
     scheduleQuote,
     declineQuote,

@@ -2,11 +2,11 @@
 // (including declined cards) and every reminder sent — the audit trail behind the
 // customer card. Shared by the owner hub (live + demo).
 import { customerNotes as customerNoteText, lawnKey } from './lawns.js';
-import { invoiceNumber, serviceDate, serviceLabel } from './invoices.js';
+import { billingMode, daysPastDue, dueDateFor, invoiceNumber, serviceDate, serviceLabel } from './invoices.js';
+import { contactPref } from './billing.js';
 import { METHODS } from './payments.js';
 import { addDays } from './dates.js';
 
-export const PAST_DUE_DAYS = 30;
 export const REMIND_GAP_DAYS = 7; // "Remind all" skips anyone reminded this recently
 
 const days = (from, to) => Math.round((new Date(`${to}T12:00:00`) - new Date(`${String(from).slice(0, 10)}T12:00:00`)) / 86400000);
@@ -27,7 +27,7 @@ export function contactsFor(jobs) {
 }
 
 /** Full history for the customer at this job's address. */
-export function customerHistory({ jobs, payments = [], key, today }) {
+export function customerHistory({ jobs, payments = [], key, today, settings }) {
   const mine = jobs.filter(j => lawnKey(j) === key && j.status !== 'quote' && j.status !== 'declined');
   const latest = [...mine].sort((a, b) => serviceDate(b).localeCompare(serviceDate(a)))[0] || {};
   const ids = new Set(mine.map(j => j.id));
@@ -42,6 +42,8 @@ export function customerHistory({ jobs, payments = [], key, today }) {
     paidAt: j.paidAt || null,
     method: j.paymentMethod || null,
     age: j.status === 'completed' && !j.paid ? days(serviceDate(j), today) : null,
+    due: j.status === 'completed' && !j.paid ? dueDateFor(j, settings) : null,
+    late: daysPastDue(j, today, settings), // days past its due date (0 = not late)
   }));
   const open = visits.filter(v => v.status === 'open');
 
@@ -89,6 +91,9 @@ export function customerHistory({ jobs, payments = [], key, today }) {
     email: latest.clientEmail || latest.email || '',
     balance: open.reduce((s, v) => s + v.amount, 0),
     oldestOpen: open.length ? open[open.length - 1] : null,
+    daysLate: Math.max(0, ...open.map(v => v.late)),
+    contactPref: contactPref(latest),
+    billing: latest.id ? billingMode(latest) : 'monthly',
     visits,
     payments: paymentRows,
     contacts: contactsFor(mine),
@@ -105,8 +110,12 @@ export function nextReminderDate(lastReminder, today) {
   return next > today ? next : null;
 }
 
-/** Customers 30+ days behind, one entry each, with their open cuts. */
-export function pastDueCustomers(jobs, today, minDays = PAST_DUE_DAYS) {
+/**
+ * Customers with something past its due date (at least minDays late), one entry each,
+ * with all their open visits (the reminder covers the whole balance).
+ * oldestDays = how many days past due their oldest bill is.
+ */
+export function pastDueCustomers(jobs, today, minDays = 1, settings) {
   const byKey = new Map();
   for (const j of jobs) {
     if (j.status !== 'completed' || j.paid) continue;
@@ -118,8 +127,9 @@ export function pastDueCustomers(jobs, today, minDays = PAST_DUE_DAYS) {
   const out = [];
   for (const [key, open] of byKey) {
     open.sort((a, b) => serviceDate(a).localeCompare(serviceDate(b)));
-    const oldest = days(serviceDate(open[0]), today);
-    if (oldest < minDays) continue;
+    const late = open.map(j => daysPastDue(j, today, settings));
+    const oldest = Math.max(0, ...late);
+    if (oldest < Math.max(1, minDays)) continue;
     const last = contactsFor(jobs.filter(j => lawnKey(j) === key))[0];
     const recentlyReminded = !!last && String(last.at).slice(0, 10) > addDays(today, -REMIND_GAP_DAYS);
     const latest = open[open.length - 1];
@@ -131,6 +141,7 @@ export function pastDueCustomers(jobs, today, minDays = PAST_DUE_DAYS) {
       email: latest.clientEmail || latest.email || '',
       jobs: open,
       balance: open.reduce((s, j) => s + (j.earnings || 0), 0),
+      overdue: open.filter((_, i) => late[i] > 0).reduce((s, j) => s + (j.earnings || 0), 0),
       oldestDays: oldest,
       oldestDate: serviceDate(open[0]),
       lastReminder: last || null,

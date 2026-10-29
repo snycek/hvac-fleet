@@ -1,5 +1,6 @@
 import { Fragment, memo, useState } from 'react';
-import { allLawns, isPastDue, money, shortDate } from '../lib/lawns.js';
+import { allLawns, money, shortDate } from '../lib/lawns.js';
+import { daysPastDue } from '../lib/invoices.js';
 import { relativeDay, repeatLabel } from '../lib/dates.js';
 import { formatSqFt } from '../lib/zones.js';
 
@@ -8,7 +9,7 @@ const td = { padding: '10px 12px', whiteSpace: 'nowrap' };
 
 /** Every lawn at a glance: numbers only. Tap a row for its payment history. */
 // bare: no title (the hub panel shows its own) and no outer card.
-function LawnsPanel({ jobs, markPaid, today, openCustomer, bare = false }) {
+function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = false }) {
   const [open, setOpen] = useState(null);
   const lawns = allLawns(jobs).sort((a, b) => (b.owed - a.owed) || (b.cuts - a.cuts));
 
@@ -31,7 +32,7 @@ function LawnsPanel({ jobs, markPaid, today, openCustomer, bare = false }) {
                 <Fragment key={l.key}>
                   <tr onClick={() => setOpen(isOpen ? null : l.key)} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', background: isOpen ? 'var(--bg-elevated)' : 'transparent' }}>
                     <td style={{ ...td, whiteSpace: 'normal', minWidth: '150px' }}>
-                      <div style={{ fontWeight: 600 }}>{isOpen ? '▾' : '▸'} {l.history.some(j => isPastDue(j, today)) && <span title="30+ days past due" aria-label="30+ days past due">⚠️ </span>}{l.name}{l.notes ? ' 📝' : ''}</div>
+                      <div style={{ fontWeight: 600 }}>{isOpen ? '▾' : '▸'} {l.history.some(j => daysPastDue(j, today, settings) > 0) && <span title="Past due" aria-label="Past due">⚠️ </span>}{l.name}{l.notes ? ' 📝' : ''}</div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{String(l.address).split(',')[0]}</div>
                     </td>
                     <td style={td}>{l.cuts}</td>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { customerHistory, methodLabel, nextReminderDate } from '../lib/customers.js';
+import { CONTACT_METHODS } from '../lib/billing.js';
 import { METHODS } from '../lib/payments.js';
 import { formatPrice, formatSqFt } from '../lib/zones.js';
 import { repeatLabel } from '../lib/dates.js';
@@ -9,17 +10,25 @@ import YardMap from './YardMap.jsx';
 const usd = n => `$${Number(n || 0).toFixed(2)}`;
 const day = iso => (iso ? new Date(String(iso).length === 10 ? `${iso}T12:00:00` : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 const stamp = iso => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
-const CHANNEL = { text: '💬 Text', email: '✉️ Email' };
+const CHANNEL = { text: '💬 Text', email: '✉️ Email', paper: '📄 Paper' };
+const contactKind = c => (c.kind === 'statement' ? `${c.periodLabel || 'monthly'} statement`
+  : c.scope === 'account' ? `account reminder (${c.jobIds.length} visit${c.jobIds.length === 1 ? '' : 's'})` : 'payment reminder');
 
 /**
  * Everything about one customer (by service address): balance, payments (incl. declined
  * cards), every reminder sent with its exact wording (audit trail), and all visits.
  */
-export default function CustomerCard({ customerKey, jobs, payments, today, onClose, onRemind, onPrint }) {
-  const h = useMemo(() => customerHistory({ jobs, payments, key: customerKey, today }), [jobs, payments, customerKey, today]);
+export default function CustomerCard({ customerKey, jobs, payments, today, settings, onClose, onRemind, onPrint, onUpdate }) {
+  const h = useMemo(() => customerHistory({ jobs, payments, key: customerKey, today, settings }), [jobs, payments, customerKey, today, settings]);
   const [tab, setTab] = useState('payments');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  // How they get bills (text / email / paper) and how often (monthly / each visit).
+  const update = async patch => {
+    setSaving(true);
+    try { await onUpdate(customerKey, patch); } catch (e) { setNote(e.message || 'Could not save.'); } finally { setSaving(false); }
+  };
 
   useEffect(() => {
     const onKey = e => { if (e.key === 'Escape') onClose(); };
@@ -59,17 +68,37 @@ export default function CustomerCard({ customerKey, jobs, payments, today, onClo
 
         <div className="cust-stats">
           <div><b style={{ color: h.balance ? '#f0b429' : '#3fb950' }}>{usd(h.balance)}</b><span>Balance</span></div>
-          <div><b>{h.oldestOpen ? `${h.oldestOpen.age}d` : '—'}</b><span>Oldest open</span></div>
+          <div><b style={{ color: h.daysLate ? '#ff7b72' : undefined }}>{h.daysLate ? `${h.daysLate}d` : h.balance ? 'Not yet' : '—'}</b><span>Past due</span></div>
           <div><b style={{ color: '#3fb950' }}>{usd(h.paidTotal)}</b><span>Paid to date</span></div>
           <div><b>{firstVisit ? day(firstVisit.date) : '—'}</b><span>Customer since</span></div>
         </div>
+
+        {onUpdate && (
+          <div className="cust-prefs">
+            <span className="cust-dim">Bills by</span>
+            <span className="seg-mini" role="group" aria-label="Preferred contact">
+              {Object.entries(CONTACT_METHODS).map(([id, m]) => (
+                <button key={id} type="button" aria-pressed={h.contactPref === id} disabled={saving}
+                  title={id === 'text' && !h.phone ? 'No phone number on file' : id === 'email' && !h.email ? 'No email on file' : `${m.label}: statements and reminders`}
+                  onClick={() => update({ contactPref: id })}>{m.icon} {m.label}</button>
+              ))}
+            </span>
+            <span className="seg-mini" role="group" aria-label="How often they're billed">
+              <button type="button" aria-pressed={h.billing === 'monthly'} disabled={saving} onClick={() => update({ billing: 'monthly' })} title="One statement a month covering every visit">Monthly</button>
+              <button type="button" aria-pressed={h.billing === 'visit'} disabled={saving} onClick={() => update({ billing: 'visit' })} title="An invoice after each visit">Each visit</button>
+            </span>
+            {((h.contactPref === 'text' && !h.phone) || (h.contactPref === 'email' && !h.email)) && (
+              <span className="cust-warn">No {h.contactPref === 'text' ? 'phone' : 'email'} on file, so we'll use what we have</span>
+            )}
+          </div>
+        )}
 
         <div className="cust-actions">
           {h.balance > 0 && onRemind && (() => {
             const wait = nextReminderDate(h.contacts[0], today);
             return <button type="button" className="btn-ghost" disabled={busy || !!wait} onClick={remind} title={wait ? 'One reminder per week' : 'Send one reminder for the whole balance'}>🔔 {busy ? 'Sending…' : wait ? `Next reminder ${new Date(`${wait}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Remind'}</button>;
           })()}
-          {h.balance > 0 && onPrint && <button type="button" className="btn-ghost" onClick={() => onPrint(h)}>🖨 Print invoice</button>}
+          {h.balance > 0 && onPrint && <button type="button" className="btn-ghost" onClick={() => onPrint(h)}>🖨 Print {h.billing === 'monthly' ? 'statement' : 'invoice'}</button>}
           {note && <span className="cust-note">{note}</span>}
         </div>
 
@@ -103,10 +132,10 @@ export default function CustomerCard({ customerKey, jobs, payments, today, onClo
                   <div className="cust-log-head">
                     <b>{stamp(c.at)}</b>
                     <span>{CHANNEL[c.channel] || c.channel}{c.to ? ` → ${c.to}` : ''}</span>
-                    <span className="cust-dim">by {c.by || 'Owner'} · {c.scope === 'account' ? `account reminder (${c.jobIds.length} visit${c.jobIds.length === 1 ? '' : 's'})` : 'payment reminder'}</span>
+                    <span className="cust-dim">by {c.by || 'Owner'} · {contactKind(c)}</span>
                   </div>
-                  <div className="cust-msg">{c.message}</div>
-                  <div className={c.delivered ? 'cust-ok' : 'cust-dim'}>{c.delivered ? '✓ Delivered' : 'Logged · not sent — texting/email isn\'t connected yet'}</div>
+                  {c.message && <div className="cust-msg">{c.message}</div>}
+                  <div className={c.delivered ? 'cust-ok' : 'cust-dim'}>{c.delivered ? '✓ Delivered' : c.channel === 'paper' ? 'Printed to mail or hand over' : 'Logged · not sent — texting/email isn\'t connected yet'}</div>
                 </li>
               ))}
             </ol>
@@ -153,7 +182,9 @@ export default function CustomerCard({ customerKey, jobs, payments, today, onClo
                     <td>{usd(v.amount)}</td>
                     <td>
                       {v.status === 'paid' && <span className="cust-ok">✓ Paid {day(v.paidAt)}{v.method ? ` · ${METHODS[v.method]?.label.toLowerCase() || v.method}` : ''}</span>}
-                      {v.status === 'open' && <span className={v.age >= 30 ? 'cust-bad' : 'cust-warn'}>{v.age >= 30 ? '⚠️ ' : ''}Open · {v.age}d</span>}
+                      {v.status === 'open' && (v.late > 0
+                        ? <span className="cust-bad">⚠️ {v.late}d past due</span>
+                        : <span className="cust-warn">Open · due {day(v.due)}</span>)}
                       {v.status === 'upcoming' && <span className="cust-dim">Scheduled</span>}
                     </td>
                   </tr>

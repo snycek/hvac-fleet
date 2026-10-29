@@ -10,7 +10,7 @@ import { mockJobs } from './src/data/mockData.js';
 import { mockTechnicians } from './src/data/mockData.js';
 import { suggestAddresses } from './src/lib/addressSuggest.js';
 import { applyPaymentResult, simulateCardCharge, voidPayment } from './src/lib/payments.js';
-import { accountFor, invoiceFor } from './src/lib/invoices.js';
+import { BILLING_DEFAULTS, accountFor, billingSettings, invoiceFor } from './src/lib/invoices.js';
 import { lawnKey } from './src/lib/lawns.js';
 import crypto from 'crypto';
 import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
@@ -125,6 +125,8 @@ const employees = [];
 // payroll.hours: owner's edits { 'empId@YYYY-MM-DD': hours }, payroll.paid: { 'empId@weekStart': ISO paid time }
 // payroll.payRain: whether rain-delay time counts as paid hours.
 const payroll = { hours: {}, paid: {}, payRain: false };
+// Billing: statements go out on `day` of each month for the month before; due `terms` days later.
+const billing = { ...BILLING_DEFAULTS };
 // Each truck's day as the foreman logs it: rolled out → back at the yard.
 const shifts = []; // { techId, date, start, end }
 
@@ -927,9 +929,66 @@ app.post('/api/invoices', (req, res) => {
   const out = ids.map((id) => jobs.find((j) => j.id === id)).filter(Boolean).map((job) => ({
     jobId: job.id,
     token: portalToken(lawnKey(job)),
-    invoice: invoiceFor(jobs, job),
+    invoice: invoiceFor(jobs, job, undefined, billing),
   }));
   res.json(out);
+});
+
+// ---- Monthly billing ----
+app.get('/api/billing', (_req, res) => res.json(billingSettings(billing)));
+app.put('/api/billing', (req, res) => {
+  Object.assign(billing, billingSettings({ ...billing, ...req.body }));
+  res.json(billingSettings(billing));
+});
+
+// Owner (statements): each customer's signed account link, by customer key.
+app.post('/api/pay-links', (req, res) => {
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys.slice(0, 1000).map(String) : [];
+  const known = new Set(jobs.map(lawnKey));
+  res.json(Object.fromEntries(keys.filter((k) => known.has(k)).map((k) => [k, portalToken(k)])));
+});
+
+// Send monthly statements: items [{ jobIds, period, periodLabel, channel, message }].
+// Logged on every visit the statement covers (one id), so the customer's contact
+// history shows it once. {payLink} becomes their account link. Paper = printed to mail
+// or hand over. (Texting/email isn't connected yet — delivered stays false until it is.)
+app.post('/api/statements/send', (req, res) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 1000) : [];
+  const origin = req.get('origin') || `${req.protocol}://${req.get('host')}`;
+  const at = new Date().toISOString();
+  const sent = [];
+  items.forEach((item, n) => {
+    const period = /^\d{4}-\d{2}$/.test(item.period) ? item.period : null;
+    const ids = (Array.isArray(item.jobIds) ? item.jobIds : []).filter((id) => jobs.some((j) => j.id === id && j.status === 'completed'));
+    if (!period || !ids.length) return;
+    const first = jobs.find((j) => j.id === ids[0]);
+    const channel = ['text', 'email', 'paper'].includes(item.channel) ? item.channel : 'paper';
+    const to = channel === 'email' ? (first.clientEmail || first.email || '') : channel === 'text' ? (first.clientPhone || '') : '';
+    const link = `${origin}/pay/${portalToken(lawnKey(first))}`;
+    const message = channel === 'paper' ? '' : String(item.message || '').slice(0, 600).replace('{payLink}', link);
+    const record = { id: `stm_${Date.now().toString(36)}_${n}`, at, kind: 'statement', period, periodLabel: String(item.periodLabel || '').slice(0, 40), scope: 'account', channel, to, by: 'Owner', message, delivered: false };
+    for (const id of ids) {
+      const idx = jobs.findIndex((x) => x.id === id);
+      jobs[idx] = { ...jobs[idx], reminders: [...(jobs[idx].reminders || []), record] };
+    }
+    console.log(`[STATEMENT] ${period} ${channel} → ${first.clientName} ${to}${message ? `: ${message}` : ''}`);
+    sent.push({ id: record.id, customer: first.clientName, jobIds: ids });
+  });
+  res.json({ sent: sent.length, items: sent });
+});
+
+// Customer billing preferences, saved on every visit at their address (so future cuts
+// copy them): contactPref text | email | paper, billing monthly | visit.
+app.put('/api/customers', (req, res) => {
+  const key = String(req.body?.key || '');
+  const patch = {};
+  if (['text', 'email', 'paper'].includes(req.body?.contactPref)) patch.contactPref = req.body.contactPref;
+  if (['monthly', 'visit'].includes(req.body?.billing)) patch.billing = req.body.billing;
+  if (!key || !Object.keys(patch).length) return res.status(400).json({ error: 'nothing to change' });
+  let n = 0;
+  jobs.forEach((j, i) => { if (lawnKey(j) === key) { jobs[i] = { ...j, ...patch }; n += 1; } });
+  if (!n) return res.status(404).json({ error: 'customer not found' });
+  res.json({ updated: n, ...patch });
 });
 
 // Customer: their account (open invoices, recent payments).
@@ -937,7 +996,7 @@ app.get('/api/portal/:token', (req, res) => {
   const key = readToken(req.params.token);
   const job = key && jobForKey(key);
   if (!job) return res.status(404).json({ error: "We couldn't find that account. Call us and we'll sort it out." });
-  res.json({ ...accountFor(jobs, job), company: 'johns' });
+  res.json({ ...accountFor(jobs, job, undefined, billing), company: 'johns' });
 });
 
 // Customer pays open invoices by card (test processor for now — only the last 4 digits
@@ -946,7 +1005,7 @@ app.post('/api/portal/:token/pay', (req, res) => {
   const key = readToken(req.params.token);
   const job = key && jobForKey(key);
   if (!job) return res.status(404).json({ error: "We couldn't find that account." });
-  const open = accountFor(jobs, job).open;
+  const open = accountFor(jobs, job, undefined, billing).open;
   const wanted = Array.isArray(req.body?.jobIds) ? req.body.jobIds : open.map((l) => l.id);
   const lines = open.filter((l) => wanted.includes(l.id));
   if (!lines.length) return res.status(400).json({ error: 'Nothing to pay — you are all caught up.' });
@@ -957,7 +1016,7 @@ app.post('/api/portal/:token/pay', (req, res) => {
   const next = applyPaymentResult({ jobs, payments, expenses }, result);
   commitBooks(next);
   if (result.status !== 'succeeded') return res.status(402).json({ error: `${result.brand} ••${result.last4} was declined: ${result.reason}. Try another card.`, payment: next.payment });
-  res.json({ payment: next.payment, account: accountFor(jobs, job) });
+  res.json({ payment: next.payment, account: accountFor(jobs, job, undefined, billing) });
 });
 
 if (fs.existsSync(distPath)) {
@@ -969,7 +1028,7 @@ if (fs.existsSync(distPath)) {
 }
 
 // Load saved data from Firebase before taking requests; first run seeds the database.
-await loadAll({ jobs, technicians, expenses, payments, delays, employees, shifts }, { payroll });
+await loadAll({ jobs, technicians, expenses, payments, delays, employees, shifts }, { payroll, billing });
 await saveNow();
 
 const PORT = process.env.PORT || 3002;

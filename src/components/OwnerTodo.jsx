@@ -1,10 +1,13 @@
 import { memo, useState } from 'react';
 import QuoteInbox from './QuoteInbox.jsx';
 import { receiptUrl } from '../hooks/useExpenses.js';
-import { MANUAL_EXPENSE_TYPES, PAST_DUE_DAYS, daysSinceCut, lawnKey, expenseType, isPastDue, money, reminderMessage, shortDate } from '../lib/lawns.js';
+import { MANUAL_EXPENSE_TYPES, lawnKey, expenseType, money, reminderMessage, shortDate } from '../lib/lawns.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { METHODS, TEST_CARDS } from '../lib/payments.js';
 import { REMIND_GAP_DAYS, contactsFor, nextReminderDate, pastDueCustomers } from '../lib/customers.js';
+import { daysPastDue, dueDateFor } from '../lib/invoices.js';
+import { monthName } from '../lib/billing.js';
+import { housekeepingItems, todoCount } from '../lib/todo.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
@@ -69,17 +72,18 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes }) {
   const [paying, setPaying] = useState(null);
   const [showAllUnpaid, setShowAllUnpaid] = useState(false);
   const UNPAID_PREVIEW = 5;
   const quotes = jobs.filter(j => j.status === 'quote');
   const toLog = expenses.filter(e => e.status === 'pending');
-  // Oldest first, so anything 30+ days past due is at the top.
+  // Oldest first.
   const unpaid = jobs.filter(j => j.status === 'completed' && !j.paid).sort((a, b) => String(a.completedAt).localeCompare(String(b.completedAt)));
-  const pastDue = unpaid.filter(j => isPastDue(j, today));
+  const lateBy = j => daysPastDue(j, today, settings);
   // Card payments that came back declined.
   const problems = unpaid.filter(j => j.paymentIssue);
+  const chores = housekeepingItems(jobs, today);
   const [choosing, setChoosing] = useState(null); // job id whose "Mark paid" menu is open
   const [testCard, setTestCard] = useState('4242');
   // Pay every open cut on an account (one tap for the whole balance).
@@ -93,39 +97,24 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     try { await markPaid(job.id, true, method, last4); } finally { setPaying(null); setChoosing(null); }
   };
   const [reminding, setReminding] = useState(null);
-  // "Remind all 30+ days": one reminder per customer, skipping anyone reminded this week.
-  // Days-late filter (All / 30+ / 45+ / 60+ / 90+ / any number): narrows the Unpaid
-  // list and picks who "Remind all" goes to (All = the usual 30+ past-due rule).
+  // Past due = something on the account is past its due date (statement or invoice).
+  // Days-late filter (Any / 30+ / 60+ / 90+ / any number): narrows the list and picks
+  // who "Remind all" goes to. One reminder per customer, skipping anyone reminded this week.
   const [lateMin, setLateMin] = useState(0);
   const [customLate, setCustomLate] = useState('');
-  const threshold = lateMin || PAST_DUE_DAYS;
+  const threshold = Math.max(1, lateMin);
   // Address / name search: narrows the list and who "Remind all" goes to.
   const [search, setSearch] = useState('');
   const q = search.trim().toLowerCase();
   const matches = x => !q || `${x.address || ''} ${x.clientName || x.name || ''}`.toLowerCase().includes(q);
-  const shownUnpaid = unpaid.filter(j => (!lateMin || daysSinceCut(j, today) >= lateMin) && matches(j));
-  const behind = pastDueCustomers(jobs, today, threshold).filter(matches);
-  const accounts = (() => {
-    const byKey = new Map();
-    for (const j of shownUnpaid) {
-      const k = lawnKey(j);
-      if (!byKey.has(k)) byKey.set(k, []);
-      byKey.get(k).push(j);
-    }
-    return [...byKey.entries()].map(([key, list]) => {
-      const cuts = list.slice().sort((a, b) => String(a.completedAt).localeCompare(String(b.completedAt)));
-      const latest = cuts[cuts.length - 1];
-      const contacts = contactsFor(jobs.filter(j => lawnKey(j) === key));
-      return {
-        key, jobs: cuts, latest,
-        name: latest.clientName, address: latest.address, email: latest.clientEmail || latest.email || '', phone: latest.clientPhone || '',
-        balance: cuts.reduce((s, j) => s + (j.earnings || 0), 0),
-        oldestDays: daysSinceCut(cuts[0], today),
-        oldestDate: String(cuts[0].completedAt || '').slice(0, 10),
-        lastReminder: contacts[0] || null, reminders: contacts.length,
-      };
-    }).sort((a, b) => b.oldestDays - a.oldestDays);
-  })();
+  const behind = pastDueCustomers(jobs, today, threshold, settings).filter(matches);
+  const accounts = behind.map(c => {
+    const contacts = contactsFor(jobs.filter(j => lawnKey(j) === c.key));
+    return { ...c, latest: c.jobs[c.jobs.length - 1], lastReminder: contacts[0] || null, reminders: contacts.length };
+  });
+  const shownUnpaid = accounts.flatMap(a => a.jobs);
+  const pastDueAll = pastDueCustomers(jobs, today, 1, settings);
+  const pastDueTotal = pastDueAll.reduce((s, c) => s + c.overdue, 0);
   // Testing helper: mark every bill in the (filtered) list paid by cash, one tap.
   const [payingAll, setPayingAll] = useState('');
   const markAllPaid = async () => {
@@ -163,8 +152,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     try { await remindCustomer(job.id, reminderMessage(job, COMPANY_INFO.name)); } finally { setReminding(null); }
   };
   const unpaidTotal = unpaid.reduce((s, j) => s + (j.earnings || 0), 0);
-  const unpaidAccounts = new Set(unpaid.map(lawnKey)).size;
-  const total = (hideQuotes ? 0 : quotes.length) + toLog.length + unpaidAccounts;
+  const total = todoCount({ jobs, expenses, today, settings, statementsReady, hideQuotes });
 
 
   return (
@@ -180,15 +168,14 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
       </div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: bare ? '14px' : '22px' }}>
-        {!hideQuotes && <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} />}
-
-        {toLog.length > 0 && (
+        {/* Billing: this month's statements to send, then anyone past due. */}
+        {statementsReady && (
           <div>
-            <h3 style={sectionTitle}>Expenses to Log · {toLog.length}</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '12px' }}>
-              {toLog.map(exp => (
-                <ExpenseToLog key={exp.id} exp={exp} foreman={technicians.find(t => t.id === exp.techId)} onLog={logExpense} onReject={rejectExpense} />
-              ))}
+            <h3 style={sectionTitle}>Billing</h3>
+            <div className="card todo-bill-card">
+              <div><b>{monthName(statementsReady.period)} statements are ready</b></div>
+              <div className="cust-dim">{statementsReady.count} customer{statementsReady.count === 1 ? '' : 's'} · {money(statementsReady.total)} · each sent their way (text, email or paper)</div>
+              {onOpenBilling && <button type="button" className="btn-primary" onClick={onOpenBilling} style={{ padding: '6px 14px', fontSize: '12px', marginTop: '8px' }}>Review &amp; send →</button>}
             </div>
           </div>
         )}
@@ -221,17 +208,17 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
           </div>
         )}
 
-        {unpaid.length > 0 && (
+        {pastDueAll.length > 0 && (
           <div>
-            <h3 style={sectionTitle}>
-              Unpaid · {unpaidAccounts} account{unpaidAccounts === 1 ? '' : 's'} · {money(unpaidTotal)}
-              {pastDue.length > 0 && <span className="past-due-count" title={`${pastDue.length} cut${pastDue.length === 1 ? '' : 's'} unpaid ${PAST_DUE_DAYS}+ days`}> · ⚠️ {pastDue.length} past {PAST_DUE_DAYS} days</span>}
+            <h3 style={{ ...sectionTitle, color: '#f0b429' }}>
+              ⚠️ Past due · {pastDueAll.length} account{pastDueAll.length === 1 ? '' : 's'} · {money(pastDueTotal)}
             </h3>
-            <div className="late-filter" role="group" aria-label="Days late">
+            <div className="cust-dim" style={{ fontSize: '11.5px', marginTop: '-6px', marginBottom: '8px' }}>Late = past the due date on their statement or invoice. Everything else is in Billing.</div>
+            <div className="late-filter" role="group" aria-label="Days past due">
               <span className="cust-dim">Days late</span>
-              {[0, 30, 45, 60, 90].map(d => (
+              {[0, 30, 60, 90].map(d => (
                 <button key={d} type="button" aria-pressed={lateMin === d && !customLate} onClick={() => { setLateMin(d); setCustomLate(''); setBulk({ open: false, busy: false, done: '' }); }}>
-                  {d ? `${d}+` : 'All'}
+                  {d ? `${d}+` : 'Any'}
                 </button>
               ))}
               <input inputMode="numeric" placeholder="Custom" aria-label="Custom days late" value={customLate}
@@ -252,8 +239,8 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
             {remindAccounts && behind.length > 0 && (
               <div className="remind-all">
                 <button type="button" className="btn-ghost remind-btn" disabled={!toRemind.length || bulk.busy} onClick={() => setBulk({ open: !bulk.open, busy: false, done: '' })}
-                  title={toRemind.length ? 'One reminder per customer, with their pay link' : `Everyone ${threshold}+ days behind was reminded in the last ${REMIND_GAP_DAYS} days`}>
-                  🔔 Remind all {threshold}+ days ({toRemind.length})
+                  title={toRemind.length ? 'One reminder per customer, with their pay link, sent the way they prefer' : `Everyone in this list was reminded in the last ${REMIND_GAP_DAYS} days`}>
+                  🔔 Remind all{lateMin ? ` ${lateMin}+ days late` : ''} ({toRemind.length})
                 </button>
                 {behind.some(c => c.recentlyReminded) && (
                   <span className="cust-dim">{behind.filter(c => c.recentlyReminded).length} already reminded this week — one reminder per week</span>
@@ -274,7 +261,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
             )}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               {(showAllUnpaid ? accounts : accounts.slice(0, UNPAID_PREVIEW)).map((acct, i) => {
-                const late = acct.oldestDays >= PAST_DUE_DAYS;
+                const late = acct.oldestDays >= 30;
                 const open = openAcct === acct.key;
                 const n = acct.jobs.length;
                 // Plow customers get pushes, not cuts.
@@ -284,7 +271,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 return (
                 <div key={acct.key} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
                   <span style={{ flex: '1 1 170px', minWidth: 0 }}>
-                    {late && <span className="yield" role="img" aria-label={`${acct.oldestDays} days past due`} title={`Oldest open cut ${acct.oldestDays} days`}>⚠️</span>}
+                    {late && <span className="yield" role="img" aria-label={`${acct.oldestDays} days past due`} title={`${acct.oldestDays} days past the due date`}>⚠️</span>}
                     <Addr job={acct.latest} />
                     <span style={{ color: 'var(--text-muted)' }}> · {acct.name}</span>
                     {acct.lastReminder && (
@@ -293,7 +280,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   </span>
                   <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
                     style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? `Show each ${snow ? 'push' : 'cut'}` : `${snow ? 'Plowed' : 'Cut'} ${shortDate(acct.jobs[0].completedAt)}`}>
-                    {n > 1 ? (open ? '▾' : '▸') : icon} {n > 1 ? `${n} ${unit} · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d
+                    {n > 1 ? (open ? '▾' : '▸') : icon} {n > 1 ? `${n} ${unit} · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d late
                   </button>
                   <span style={{ fontWeight: 700, width: '62px', textAlign: 'right' }}>{money(acct.balance)}</span>
                   <span className="row-actions">
@@ -333,10 +320,10 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   {open && n > 1 && (
                     <div className="acct-cut-list">
                       {acct.jobs.map(job => {
-                        const d = daysSinceCut(job, today);
+                        const d = lateBy(job);
                         return (
                           <div key={job.id} className="acct-cut">
-                            <span className={d >= PAST_DUE_DAYS ? 'cust-warn' : 'cust-dim'}>{icon} {shortDate(job.completedAt)} · {d}d</span>
+                            <span className={d > 0 ? 'cust-warn' : 'cust-dim'}>{icon} {shortDate(job.completedAt)} · {d > 0 ? `${d}d late` : `due ${shortDate(dueDateFor(job, settings))}`}</span>
                             <span style={{ fontWeight: 600 }}>{money(job.earnings || 0)}</span>
                             <span className="acct-cut-pay">
                               <span className="cust-dim">Paid:</span>
@@ -358,6 +345,47 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 {showAllUnpaid ? 'Show less' : `Show ${accounts.length - UNPAID_PREVIEW} more`}
               </button>
             )}
+          </div>
+        )}
+
+        {/* Quotes: the inbox itself, or (on the hub, where Quotes has its own tab) a pointer to it. */}
+        {!hideQuotes ? (
+          <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} />
+        ) : quotes.length > 0 && (
+          <div>
+            <h3 style={sectionTitle}>Quotes</h3>
+            <button type="button" className="card todo-link" onClick={onOpenQuotes}>
+              📝 <b>{quotes.length} new quote request{quotes.length === 1 ? '' : 's'}</b> <span className="cust-dim">· open Quotes →</span>
+            </button>
+          </div>
+        )}
+
+        {toLog.length > 0 && (
+          <div>
+            <h3 style={sectionTitle}>Expenses to Log · {toLog.length}</h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '12px' }}>
+              {toLog.map(exp => (
+                <ExpenseToLog key={exp.id} exp={exp} foreman={technicians.find(t => t.id === exp.techId)} onLog={logExpense} onReject={rejectExpense} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {(chores.noContact.length > 0 || chores.staleQuotes.length > 0) && (
+          <div>
+            <h3 style={sectionTitle}>Housekeeping</h3>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              {chores.staleQuotes.length > 0 && (
+                <button type="button" className="chore-row" onClick={onOpenQuotes}>
+                  ⏳ <span><b>{chores.staleQuotes.length} quote{chores.staleQuotes.length === 1 ? '' : 's'}</b> waiting over a week for an answer</span>
+                </button>
+              )}
+              {chores.noContact.map(j => (
+                <button key={lawnKey(j)} type="button" className="chore-row" onClick={() => openCustomer?.(j)}>
+                  📇 <span><b>{String(j.address || '').split(',')[0]}</b> · {j.clientName}: no phone or email, so bills go on paper</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
 

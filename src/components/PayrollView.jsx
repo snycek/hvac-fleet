@@ -192,7 +192,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
     { label: `Overtime (>${OVERTIME_AFTER}h)`, value: fmtHours(Math.round(totals.ot * 4) / 4), color: totals.ot ? '#f0b429' : undefined },
     { label: 'Gross payroll', value: money(totals.gross), color: 'var(--text-primary)' },
     { label: 'Unpaid', value: money(totals.unpaid), color: totals.unpaid ? '#f0b429' : '#3fb950' },
-    { label: 'Labor vs billed', value: laborPct != null ? `${laborPct}%` : '—', sub: billed ? `of ${money(billed)}` : '' },
+    { label: 'Labor vs earned', value: laborPct != null ? `${laborPct}%` : '—', sub: billed ? `of ${money(billed)}` : '' },
   ];
 
   return (

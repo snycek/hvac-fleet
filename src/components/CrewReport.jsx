@@ -36,7 +36,7 @@ function WeekdayBars({ cuts, compact }) {
             <div key={d.label} role="row" style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
               onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}
               onFocus={() => setHover(i)} onBlur={() => setHover(null)} tabIndex={0}
-              aria-label={`${d.label}: ${d.lawns} lawns, ${money(d.billed)} billed`}>
+              aria-label={`${d.label}: ${d.lawns} lawns, ${money(d.billed)} earned`}>
               {/* Hover target is the whole column, bigger than the bar */}
               <div style={{ height: `${PLOT}px`, width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', borderBottom: '1px solid var(--border)' }}>
                 <div style={{
@@ -111,7 +111,7 @@ function CrewReport({ jobs, technicians, today = todayString(), compact = false,
       <div style={{ display: 'flex', gap: compact ? '10px' : '16px', fontSize: compact ? '12px' : '13px', color: 'var(--text-muted)', marginBottom: compact ? '6px' : '10px', flexWrap: 'wrap' }}>
         <span>✂️ <b style={{ color: 'var(--text-primary)' }}>{cuts.length}</b> lawns</span>
         <span>🚜 <b style={{ color: 'var(--text-primary)' }}>{rows.length}</b> foremen</span>
-        <span>💲 <b style={{ color: 'var(--text-primary)' }}>{money(totalBilled)}</b> billed</span>
+        <span>💲 <b style={{ color: 'var(--text-primary)' }}>{money(totalBilled)}</b> earned</span>
         {rainMinutes(delays, null, range.from, range.to) > 0 && (
           <span style={{ color: '#58a6ff' }}>🌧 <b>{hoursMins(rainMinutes(delays, null, range.from, range.to))}</b> rain</span>
         )}
@@ -124,7 +124,7 @@ function CrewReport({ jobs, technicians, today = todayString(), compact = false,
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: compact ? '12px' : '13px' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Foreman', 'Lawns', 'Avg', 'Time', mode === 'day' ? 'Start' : 'Avg start', mode === 'day' ? 'End' : 'Avg end', '🌧 Rain', 'Billed'].map(h => <th key={h} style={th}>{h}</th>)}
+                {['Foreman', 'Lawns', 'Avg', 'Time', mode === 'day' ? 'Start' : 'Avg start', mode === 'day' ? 'End' : 'Avg end', '🌧 Rain', 'Earned'].map(h => <th key={h} style={th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>

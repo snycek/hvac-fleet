@@ -9,6 +9,10 @@ import { laborExpenses } from '../lib/payroll.js';
 import { SPEEDS, useDemoSim } from '../hooks/useDemoSim.js';
 import FleetMap from '../components/FleetMap.jsx';
 import OwnerTodo from '../components/OwnerTodo.jsx';
+import { todoCount as countTodo } from '../lib/todo.js';
+import BillingPanel from '../components/BillingPanel.jsx';
+import { fetchPayLinks, useBilling } from '../hooks/useBilling.js';
+import { latestBilledPeriod, periodLabel, remindBy, statementMessage, statementOpenLines, statementSheet, statementsFor } from '../lib/billing.js';
 import QuoteInbox from '../components/QuoteInbox.jsx';
 import ProfitLoss from '../components/ProfitLoss.jsx';
 import LawnsPanel from '../components/LawnsPanel.jsx';
@@ -22,7 +26,7 @@ import CustomerCard from '../components/CustomerCard.jsx';
 import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { COMPANY_INFO } from '../data/services.js';
-import { demoAccountHash, invoiceFor } from '../lib/invoices.js';
+import { billingMode, demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
 import { addDays, formatDay, todayString } from '../lib/dates.js';
 import { dayOf, hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
@@ -113,11 +117,23 @@ export default function OwnerView() {
   const payroll       = usePayroll({ demo: demoOn, foremen: demoOn ? sim.technicians : [] });
   const shifts        = demoOn ? sim.shifts : liveShifts; // rolled out → back at yard
   const payments      = demoOn ? sim.payments : livePayments;
+  const sendStatementsFn = demoOn ? sim.sendStatements : live.sendStatements;
+  const updateCustomer = demoOn ? sim.updateCustomer : live.updateCustomer;
+  const billing       = useBilling(demoOn);
+  const settings      = billing.settings;
 
   // Quotes live in To-Do until accepted; declined ones are hidden.
   const jobs = useMemo(() => allJobs.filter(j => !['quote', 'declined'].includes(j.status)), [allJobs]);
   // The demo runs on its own calendar; reports treat the demo's date as "today".
   const today = demoOn ? sim.date : todayString();
+  // Demo: statements dated before the demo started count as already sent (sample history).
+  const assumeSentBefore = demoOn ? sim.start : null;
+  const latestPeriod = latestBilledPeriod(today, settings);
+  const statementsReady = useMemo(() => {
+    const unsent = statementsFor(allJobs, latestPeriod, today, settings, { assumeSentBefore }).filter(st => st.status === 'unsent');
+    return unsent.length ? { period: latestPeriod, count: unsent.length, total: unsent.reduce((s, st) => s + st.total, 0) } : null;
+  }, [allJobs, latestPeriod, today, settings, assumeSentBefore]);
+
   // P/L expenses = logged expenses + each crew's labor (from payroll hours × rates).
   const labor = useMemo(() => laborExpenses({ employees: payroll.employees, jobs, shifts, delays, settings: payroll.settings, today }),
     [payroll.employees, payroll.settings, jobs, shifts, delays, today]);
@@ -137,7 +153,7 @@ export default function OwnerView() {
     let items;
     if (demoOn) {
       items = visitJobs.map(j => {
-        const invoice = invoiceFor(allJobs, j, today);
+        const invoice = invoiceFor(allJobs, j, today, settings);
         const open = [...invoice.previous, ...(invoice.current.paid ? [] : [invoice.current])];
         const hash = demoAccountHash({ customer: invoice.customer, open, asOf: today });
         return { key: j.id, invoice, crew: crewOf(j), payUrl: `${window.location.origin}/pay/demo#${hash}` };
@@ -152,9 +168,42 @@ export default function OwnerView() {
     }
     setPrinting({ title, items });
   };
+  // Monthly statements: print (record=true also logs them as sent on paper) and send
+  // (text/email, the way each customer prefers). Each carries the customer's pay link.
+  const statementPayUrls = async list => {
+    if (demoOn) return Object.fromEntries(list.map(st => [st.key, `${window.location.origin}/pay/demo#${demoAccountHash({ customer: { name: st.name, address: st.address }, open: statementOpenLines(st), asOf: today })}`]));
+    const tokens = await fetchPayLinks(list.map(st => st.key));
+    return Object.fromEntries(list.map(st => [st.key, `${window.location.origin}/pay/${tokens[st.key] || ''}`]));
+  };
+  const statementItems = (list, channelOf, messageOf) => list.map(st => ({
+    jobIds: st.visits.map(j => j.id), period: st.period, periodLabel: periodLabel(st.period), channel: channelOf(st), message: messageOf(st),
+  }));
+  const printStatements = async (list, record = false) => {
+    if (!list.length) return;
+    const urls = await statementPayUrls(list);
+    setPrinting({ title: list.length === 1 ? `Statement · ${list[0].name}` : `${periodLabel(list[0].period)} statements`, items: list.map(st => ({ key: st.key, invoice: statementSheet(st), payUrl: urls[st.key] })) });
+    if (record) await sendStatementsFn(statementItems(list, () => 'paper', () => ''));
+  };
+  const sendStatements = async list => {
+    const urls = demoOn ? await statementPayUrls(list) : {};
+    const message = st => { const m = statementMessage(st, COMPANY_INFO.name); return demoOn ? m.replace('{payLink}', urls[st.key]) : m; };
+    return sendStatementsFn(statementItems(list, st => st.reach, message));
+  };
+  // A customer's bill: monthly customers get their latest statement; others the invoice for their latest visit.
+  const printBillFor = job => {
+    const key = lawnKey(job);
+    if (billingMode(job) === 'monthly') {
+      const st = statementsFor(allJobs, latestPeriod, today, settings).find(s => s.key === key)
+        || statementsFor(allJobs, today.slice(0, 7), today, settings).find(s => s.key === key);
+      if (st) return printStatements([st]);
+    }
+    const latest = allJobs.filter(j => lawnKey(j) === key && j.status === 'completed' && !j.paid)
+      .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)))[0] || job;
+    return printInvoices([latest], `Invoice · ${job.clientName}`);
+  };
   // Demo pay link for a customer (the link carries their open visits).
   const demoPayLink = job => {
-    const invoice = invoiceFor(allJobs, job, today);
+    const invoice = invoiceFor(allJobs, job, today, settings);
     const open = [...invoice.previous, ...(invoice.current.paid ? [] : [invoice.current])];
     return `${window.location.origin}/pay/demo#${demoAccountHash({ customer: invoice.customer, open, asOf: today })}`;
   };
@@ -163,8 +212,8 @@ export default function OwnerView() {
     const items = customers.map(c => {
       const latest = c.jobs[c.jobs.length - 1];
       const message = accountReminder(c, COMPANY_INFO.name);
-      return { jobIds: c.jobs.map(j => j.id), channel: c.email ? 'email' : 'text', message: demoOn ? message.replace('{payLink}', demoPayLink(latest)) : message };
-    });
+      return { jobIds: c.jobs.map(j => j.id), channel: remindBy(latest), message: demoOn ? message.replace('{payLink}', demoPayLink(latest)) : message };
+    }).filter(it => it.channel); // no phone or email: nothing to send (their bills go on paper)
     return remindCustomersFn(items);
   };
   // Open cuts for one customer, shaped for remindAccounts.
@@ -200,10 +249,11 @@ export default function OwnerView() {
   const planRoutes = demoOn ? sim.planRoutes : livePlanRoutes;
 
   // Today's visits for one truck (route order) or every truck.
+  // Door invoices are only for customers billed per visit (monthly ones get a statement).
   const todaysVisits = techId => jobs
-    .filter(j => jobDay(j, today) === today && j.status !== 'quote' && (!techId || j.assignedTo === techId))
+    .filter(j => jobDay(j, today) === today && j.status !== 'quote' && billingMode(j) === 'visit' && (!techId || j.assignedTo === techId))
     .sort((a, b) => String(a.assignedTo).localeCompare(String(b.assignedTo)));
-  const routeTechs = technicians.filter(t => t.status !== 'pending_approval' && jobs.some(j => j.assignedTo === t.id && jobDay(j, today) === today));
+  const routeTechs = technicians.filter(t => t.status !== 'pending_approval' && jobs.some(j => j.assignedTo === t.id && jobDay(j, today) === today && billingMode(j) === 'visit'));
 
   const toggleDemo = () => {
     if (demoOn) sim.pause();
@@ -251,20 +301,17 @@ export default function OwnerView() {
       if (collapsed.todo) setCollapsed(c => ({ ...c, todo: false }));
     }
   }
-  const todoCount = useMemo(() => (
-    expenses.filter(e => e.status === 'pending').length
-    + new Set(jobs.filter(j => j.status === 'completed' && !j.paid).map(lawnKey)).size
-  ), [expenses, jobs]);
+  const todoCount = useMemo(() => countTodo({ jobs: allJobs, expenses, today, settings, statementsReady }), [allJobs, expenses, today, settings, statementsReady]);
 
   const kpiGroups = [
     { title: 'Today', tiles: [
       { label: 'Cut', value: `${stats.cutToday}/${stats.totalToday}` },
       { label: 'Left', value: stats.leftToday },
-      { label: 'Billed', value: money(stats.billedToday) },
+      { label: 'Earned', value: money(stats.billedToday) },
       { label: 'Collected', value: money(stats.collectedToday), color: '#3fb950' },
     ] },
     { title: 'This month', tiles: [
-      { label: 'Billed', value: money(stats.billedMonth) },
+      { label: 'Earned', value: money(stats.billedMonth) },
       { label: 'Collected', value: money(stats.month.incomeTotal), color: '#3fb950' },
       { label: 'Expenses', value: money(stats.month.expenseTotal) },
       { label: 'Net', value: money(stats.month.net), color: stats.month.net >= 0 ? '#3fb950' : '#ff7b72' },
@@ -352,10 +399,11 @@ export default function OwnerView() {
 
       {customerKey && (
         <CustomerCard
-          customerKey={customerKey} jobs={allJobs} payments={payments} today={today}
+          customerKey={customerKey} jobs={allJobs} payments={payments} today={today} settings={settings}
           onClose={() => setCustomerKey(null)}
           onRemind={() => remindAccounts([openAccount(customerKey)])}
-          onPrint={() => { const a = openAccount(customerKey); if (a.jobs.length) printInvoices([a.jobs[a.jobs.length - 1]], `Invoice · ${a.name}`); }}
+          onPrint={() => { const a = openAccount(customerKey); if (a.jobs.length) printBillFor(a.jobs[a.jobs.length - 1]); }}
+          onUpdate={updateCustomer}
         />
       )}
       {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
@@ -372,6 +420,7 @@ export default function OwnerView() {
               <div className="dash-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={leftTab === 'todo'} onClick={() => setLeftTab('todo')}>📥 To-Do{todoCount ? <span className="tab-count">{todoCount}</span> : null}</button>
                 <button type="button" role="tab" aria-selected={leftTab === 'quotes'} onClick={() => setLeftTab('quotes')}>📝 Quotes{quoteCount ? <span className="tab-count new">{quoteCount}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'billing'} onClick={() => setLeftTab('billing')}>💵 Billing{statementsReady ? <span className="tab-count">{statementsReady.count}</span> : null}</button>
                 <button type="button" role="tab" aria-selected={leftTab === 'lawns'} onClick={() => setLeftTab('lawns')}>🌱 Lawns<span className="tab-count muted">{stats.lawns}</span></button>
               </div>
             </div>
@@ -388,15 +437,15 @@ export default function OwnerView() {
                   logExpense={logExpense} rejectExpense={rejectExpense}
                   remindCustomer={remindCustomer} today={today}
                   remindAccounts={remindAccounts} openCustomer={openCustomer} planRoutes={planRoutes}
-                  // From Unpaid: print off their latest unpaid cut so every older one shows as balance.
-                  printInvoice={job => {
-                    const latest = allJobs.filter(j => lawnKey(j) === lawnKey(job) && j.status === 'completed' && !j.paid)
-                      .sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)))[0] || job;
-                    printInvoices([latest], `Invoice · ${job.clientName}`);
-                  }}
+                  printInvoice={printBillFor}
+                  settings={settings} statementsReady={statementsReady}
+                  onOpenBilling={() => setLeftTab('billing')} onOpenQuotes={() => setLeftTab('quotes')}
                 />
+              ) : leftTab === 'billing' ? (
+                <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
+                  onSend={sendStatements} onPrint={printStatements} openCustomer={key => setCustomerKey(key)} assumeSentBefore={assumeSentBefore} />
               ) : (
-                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} openCustomer={key => setCustomerKey(key)} />
+                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} />
               )}
             </div>}
           </section>
@@ -409,9 +458,9 @@ export default function OwnerView() {
               <CollapseButton collapsed={collapsed.routes} onToggle={() => toggle('routes')} label="Routes" />
               <span className="dash-panel-title">🚜 Routes today</span>
               <span className="dash-head-note">{stats.cutToday}/{stats.totalToday} cut · {stats.leftToday} left · {money(stats.billedToday)}</span>
-              {!collapsed.routes && (
+              {!collapsed.routes && routeTechs.length > 0 && (
                 <span className="print-menu">
-                  <button type="button" className="btn-ghost head-btn" onClick={() => setPrintMenu(m => !m)} aria-expanded={printMenu} title="Print today's paper invoices to leave at each door">🖨 Invoices</button>
+                  <button type="button" className="btn-ghost head-btn" onClick={() => setPrintMenu(m => !m)} aria-expanded={printMenu} title="Print invoices to leave at the door, for customers billed each visit">🖨 Door invoices</button>
                   {printMenu && (
                     <span className="print-menu-list" role="menu">
                       <button type="button" role="menuitem" onClick={() => printInvoices(todaysVisits(), `Today's invoices · all trucks`)}>All trucks ({todaysVisits().length})</button>

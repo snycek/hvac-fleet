@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useJobs } from '../hooks/useJobs.js';
 import { useTechnicians } from '../hooks/useTechnicians.js';
 import { useExpenses } from '../hooks/useExpenses.js';
@@ -34,7 +34,12 @@ import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { lawnCrews, wantsLandscaping } from '../lib/crews.js';
 import { directionsLinks, fmtDrive, nearestTruck, roadRoute } from '../lib/distance.js';
-import { costRates as computeCostRates } from '../lib/jobCost.js';
+import { actualCutBreakdown, costRates as computeCostRates, cutBreakdown, fixedMonthlyTotal } from '../lib/jobCost.js';
+import { makeCrewOnDay } from '../lib/payroll.js';
+import BooksView from '../components/BooksView.jsx';
+import { lawnStats } from '../lib/lawns.js';
+import { unreadMessages } from '../lib/crewNotes.js';
+import { CrewMessages } from '../components/CrewNotes.jsx';
 import { COMPANY_INFO } from '../data/services.js';
 import { billingMode, demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
@@ -114,6 +119,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
   // Phones: one section per screen, picked from a bottom tab bar.
   const isPhone = useIsPhone();
   const [phoneTab, setPhoneTab] = useState('today');
+  const [phoneBooks, setPhoneBooks] = useState(false);
   const [phoneNumbers, setPhoneNumbers] = useState(false); // slim numbers line opened up
   const [phoneDemo, setPhoneDemo] = useState(false);       // demo controls opened up
   const [phoneActivity, setPhoneActivity] = useState(false);
@@ -388,7 +394,27 @@ export default function OwnerView({ demoOnly = false } = {}) {
   // What a cut costs (crew pay, gas, wear, card fees) from the last 60 days of books.
   const costRates = useMemo(() => computeCostRates({ jobs, expenses, employees: payroll.employees, technicians, today }),
     [jobs, expenses, payroll.employees, technicians, today]);
-  const fixedCosts = settings.fixedCosts || [];
+  const fixedCosts = useMemo(() => settings.fixedCosts || [], [settings.fixedCosts]);
+  // After the cut: that day's crew (payroll hours), time on site and drive → actual net.
+  const crewOnDay = useMemo(() => makeCrewOnDay({ employees: payroll.employees, jobs, shifts, delays, settings: payroll.settings }),
+    [payroll.employees, jobs, shifts, delays, payroll.settings]);
+  const actualFor = useCallback(job => actualCutBreakdown({ job, crewOnDay, rates: costRates, fixedMonthly: fixedMonthlyTotal(fixedCosts) }),
+    [crewOnDay, costRates, fixedCosts]);
+  // { actual, estimate } for one finished visit (estimate = the lawn's averages, as on the quote).
+  const costFor = useCallback(job => {
+    if (job.status !== 'completed' || !(job.earnings > 0)) return null;
+    const actual = actualFor(job);
+    if (!(Number(job.repeatDays) > 0)) return { actual, estimate: null }; // one-time job: nothing to compare to
+    const l = lawnStats(allJobs, lawnKey(job));
+    return {
+      actual,
+      estimate: cutBreakdown({ price: job.earnings, minutes: l.avgMinutes, sqFt: l.sqFt, repeatDays: job.repeatDays, payMethod: job.paymentMethod || null, rates: costRates, fixedMonthly: fixedMonthlyTotal(fixedCosts) }),
+    };
+  }, [actualFor, allJobs, costRates, fixedCosts]);
+  // Messages from the crew (💬 Tell the owner on a stop).
+  const unreadMsgs = useMemo(() => unreadMessages(allJobs), [allJobs]);
+  const markNoteRead = demoOn ? sim.markNoteRead : live.markNoteRead;
+  const messagesEl = unreadOnly => <CrewMessages jobs={allJobs} technicians={technicians} onRead={markNoteRead} openCustomer={key => setCustomerKey(key)} unreadOnly={unreadOnly} />;
   const todoCount = useMemo(() => countTodo({ jobs: allJobs, expenses, today, settings, statementsReady, payDue }), [allJobs, expenses, today, settings, statementsReady, payDue]);
 
   const kpiGroups = [
@@ -556,6 +582,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           onUpdate={updateCustomer}
           technicians={technicians}
           onAskCrew={demoOn ? sim.askCrewNextVisit : live.askCrewNextVisit}
+          costFor={costFor}
         />
       )}
       {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
@@ -594,7 +621,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
   if (isPhone) {
     const PHONE_TABS = [
       { id: 'today', icon: '🏠', label: 'Today' },
-      { id: 'todo', icon: '📥', label: 'To-Do', badge: todoCount },
+      { id: 'todo', icon: '📥', label: 'To-Do', badge: todoCount + unreadMsgs },
       { id: 'money', icon: '💵', label: 'Money', badge: statementsReady ? statementsReady.count : 0 },
       { id: 'customers', icon: '👥', label: 'Customers' },
       { id: 'crew', icon: '👷', label: 'Crew' },
@@ -652,11 +679,20 @@ export default function OwnerView({ demoOnly = false } = {}) {
             </>
           )}
           {phoneTab === 'todo' && (
-            <section className="phone-card"><OwnerTodo bare {...todoProps} /></section>
+            <>
+              {unreadMsgs > 0 && <section className="phone-card">{messagesEl(true)}</section>}
+              <section className="phone-card"><OwnerTodo bare {...todoProps} /></section>
+            </>
           )}
           {phoneTab === 'money' && (
             <>
-              <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} />
+              <section className="phone-card">
+                <button type="button" className="phone-card-head phone-toggle" aria-expanded={phoneBooks} onClick={() => setPhoneBooks(o => !o)}>
+                  📒 Books <span className="dash-head-note">monthly reports for your accountant {phoneBooks ? '▾' : '▸'}</span>
+                </button>
+                {phoneBooks && <BooksView jobs={jobs} expenses={expenses} payroll={payroll} shifts={shifts} delays={delays} fixedCosts={fixedCosts} today={today} demo={demoOn} />}
+              </section>
+              <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} actualFor={actualFor} />
               <section className="phone-card">
                 <div className="phone-card-head">💵 Billing</div>
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
@@ -700,6 +736,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           <div className="hub-tabs" role="tablist" style={{ marginTop: '6px' }}>
             <button type="button" role="tab" aria-selected={view === 'hub'} onClick={() => setView('hub')}>📊 Hub</button>
             <button type="button" role="tab" aria-selected={view === 'payroll'} onClick={() => setView('payroll')}>👷 Crew & Payroll</button>
+            <button type="button" role="tab" aria-selected={view === 'books'} onClick={() => setView('books')}>📒 Books</button>
           </div>
         </div>
         {/* On phones/tablets the Crew numbers live on the Crew & Payroll tab, not the Hub. */}
@@ -716,7 +753,9 @@ export default function OwnerView({ demoOnly = false } = {}) {
       {demoOn && demoBarEl}
 
       {overlaysEl}
-      {view === 'payroll' ? (
+      {view === 'books' ? (
+        <BooksView jobs={jobs} expenses={expenses} payroll={payroll} shifts={shifts} delays={delays} fixedCosts={fixedCosts} today={today} demo={demoOn} />
+      ) : view === 'payroll' ? (
         <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek} />
       ) : (
       <div className="dash-main" style={gridVars}>
@@ -731,6 +770,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
               <div className="dash-tabs" role="tablist">
                 <button type="button" role="tab" aria-selected={leftTab === 'todo' && !collapsed.todo} onClick={() => pickLeftTab('todo')}>📥 To-Do{todoCount ? <span className="tab-count">{todoCount}</span> : null}</button>
                 <button type="button" role="tab" aria-selected={leftTab === 'quotes' && !collapsed.todo} onClick={() => pickLeftTab('quotes')}>📝 Quotes{quoteCount ? <span className="tab-count new">{quoteCount}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'messages' && !collapsed.todo} onClick={() => pickLeftTab('messages')}>💬 Messages{unreadMsgs ? <span className="tab-count new">{unreadMsgs}</span> : null}</button>
                 <button type="button" role="tab" aria-selected={leftTab === 'billing' && !collapsed.todo} onClick={() => pickLeftTab('billing')}>💵 Billing{statementsReady ? <span className="tab-count">{statementsReady.count}</span> : null}</button>
                 <button type="button" role="tab" aria-selected={leftTab === 'lawns' && !collapsed.todo} onClick={() => pickLeftTab('lawns')}>🌱 Lawns<span className="tab-count muted">{stats.lawns}</span></button>
               </div>
@@ -748,6 +788,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
               ) : leftTab === 'billing' ? (
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
                   onSend={sendStatements} onPrint={printStatements} openCustomer={key => setCustomerKey(key)} assumeSentBefore={assumeSentBefore} />
+              ) : leftTab === 'messages' ? (
+                messagesEl(false)
               ) : (
                 <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} {...lawnsMove} />
               )}
@@ -824,7 +866,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
 
         {/* 4. Money + who cut what */}
         <div className="dash-col">
-          <ProfitLoss compact collapsed={!!collapsed.pl} onToggleCollapse={() => toggle('pl')} jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} />
+          <ProfitLoss compact collapsed={!!collapsed.pl} onToggleCollapse={() => toggle('pl')} jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} actualFor={actualFor} />
           <CrewReport compact collapsed={!!collapsed.crew} onToggleCollapse={() => toggle('crew')} jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
         </div>
       </div>

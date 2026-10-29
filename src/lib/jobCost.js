@@ -86,3 +86,75 @@ export function cutBreakdown({ price, minutes = null, sqFt = null, repeatDays = 
     cutsPerMonth: cutsPerMonthFor(repeatDays),
   };
 }
+
+
+// ---- After the cut: what it actually cost ----
+const minutesBetween = (a, b) => (a && b ? (new Date(b) - new Date(a)) / 60000 : null);
+const cardLine = (pay, price, rates) => (pay === 'card'
+  ? { label: 'Card fee (paid by card)', amount: -cardFee(price) }
+  : pay ? { label: `Card fee (paid by ${pay})`, amount: 0 }
+    : { label: `Card fee (~${Math.round(rates.cardShare * 100)}% pay by card)`, amount: -cardFee(price) * rates.cardShare });
+
+/**
+ * One finished cut with that day's real numbers: time on site (Start → Mark Cut), the drive
+ * over (On my way → arriving), and the crew that actually worked that day (crewOnDay from
+ * payroll.js). Falls back to the estimate's numbers for anything not recorded.
+ */
+export function actualCutBreakdown({ job, crewOnDay, rates, fixedMonthly = 0 }) {
+  const onSite = minutesBetween(job.startedAt, job.completedAt);
+  const drive = minutesBetween(job.enRouteAt, job.startedAt);
+  const date = String(job.scheduledDate || job.completedAt || '').slice(0, 10);
+  const crew = job.assignedTo && crewOnDay ? crewOnDay(job.assignedTo, date) : null;
+  const people = crew?.people?.length || rates.crewSize;
+  const perHour = crew?.people?.length ? crew.perHour : rates.crewPerHour;
+  const mins = onSite != null && onSite >= 1 && onSite < 600 ? Math.round(onSite) : Math.round(rates.avgMinutes);
+  const driveMins = drive != null && drive >= 0 && drive < 90 ? Math.round(drive) : DRIVE_MIN;
+  const perMin = perHour / 60;
+  const price = job.earnings || 0;
+  const card = cardLine(job.paymentMethod || null, price, rates);
+  const lines = [
+    { key: 'labor', label: `Crew labor · ${mins} min × ${people} ${people === 1 ? 'person' : 'people'}`, amount: -mins * perMin },
+    { key: 'drive', label: `Driving · ${driveMins} min${drive == null ? ' (est.)' : ''}`, amount: -driveMins * perMin },
+    { key: 'gas', label: 'Gas', amount: -rates.gasPerCut },
+    { key: 'wear', label: 'Mower wear & blades', amount: -rates.wearPerCut },
+    { key: 'card', ...card },
+    ...(rates.otherPerCut > 0.005 ? [{ key: 'other', label: 'Other expenses', amount: -rates.otherPerCut }] : []),
+    fixedMonthly > 0
+      ? { key: 'fixed', label: 'Overhead share (insurance, truck…)', amount: -fixedMonthly / Math.max(1, rates.cutsPerMonth) }
+      : { key: 'fixed', label: 'Overhead (fixed costs not entered yet)', amount: 0, muted: true },
+  ].map(l => ({ ...l, amount: Math.round(l.amount * 100) / 100 }));
+  const cost = -lines.reduce((s, l) => s + l.amount, 0);
+  const net = Math.round((price - cost) * 100) / 100;
+  // One-time jobs (landscaping, a single cleanup) have no "per month".
+  const recurring = Number(job.repeatDays) > 0;
+  return {
+    actual: true, oneTime: !recurring, price, minutes: mins, driveMinutes: driveMins, people, crew: crew?.people || [],
+    lines, cost: Math.round(cost * 100) / 100, net, margin: price ? net / price : 0,
+    perMonth: recurring ? Math.round(net * cutsPerMonthFor(job.repeatDays) * 100) / 100 : null,
+    perSeason: recurring ? Math.round(net * cutsPerSeasonFor(job.repeatDays) * 100) / 100 : null,
+    cutsPerMonth: recurring ? cutsPerMonthFor(job.repeatDays) : null,
+  };
+}
+
+/** Average of several actual cuts (same line keys), e.g. a lawn's last 4. */
+export function averageBreakdowns(list) {
+  if (!list.length) return null;
+  const n = list.length;
+  const avg = k => Math.round((list.reduce((s, b) => s + b[k], 0) / n) * 100) / 100;
+  const keys = [...new Set(list.flatMap(b => b.lines.map(l => l.key)))];
+  const lines = keys.map(k => {
+    const amount = Math.round((list.reduce((s, b) => s + (b.lines.find(l => l.key === k)?.amount || 0), 0) / n) * 100) / 100;
+    return { ...list.map(b => b.lines.find(l => l.key === k)).find(Boolean), amount };
+  });
+  const minutes = Math.round(list.reduce((s, b) => s + b.minutes, 0) / n);
+  const drive = Math.round(list.reduce((s, b) => s + b.driveMinutes, 0) / n);
+  const people = Math.round((list.reduce((s, b) => s + b.people, 0) / n) * 10) / 10;
+  const relabel = { labor: `Crew labor · avg ${minutes} min × ${people} people`, drive: `Driving · avg ${drive} min` };
+  const price = avg('price');
+  return {
+    ...list[0], actual: true, averaged: n, minutes, driveMinutes: drive, people,
+    lines: lines.map(l => (relabel[l.key] ? { ...l, label: relabel[l.key] } : l)),
+    price, cost: avg('cost'), net: avg('net'), margin: price ? avg('net') / price : 0,
+    perMonth: avg('perMonth'), perSeason: avg('perSeason'),
+  };
+}

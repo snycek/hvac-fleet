@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import CostSheet from './CostSheet.jsx';
 import { allLawns, dayOf } from '../lib/lawns.js';
 import { addDays } from '../lib/dates.js';
-import { cutBreakdown, fixedMonthlyTotal } from '../lib/jobCost.js';
+import { averageBreakdowns, cutBreakdown, fixedMonthlyTotal } from '../lib/jobCost.js';
 
 const usd = n => `${n < 0 ? '−' : ''}$${Math.abs(n || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 const usd2 = n => `${n < 0 ? '−' : ''}$${Math.abs(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -15,7 +15,9 @@ const payMethodOf = l => l.history.find(j => j.paid && j.paymentMethod)?.payment
  * Per-lawn money: price, what a cut costs, net — worst margins first — plus the next 30
  * days forecast (every regular customer's cuts) and John's fixed monthly costs.
  */
-export default function LawnBreakdown({ jobs, rates, today, fixedCosts = [], onSaveFixed, onClose }) {
+// actualFor(job): a finished cut with that day's real crew, time on site and drive.
+// Lawns with recent timed cuts use the average of their last 4; others use the estimate.
+export default function LawnBreakdown({ jobs, rates, today, fixedCosts = [], onSaveFixed, onClose, actualFor = null }) {
   const [open, setOpen] = useState(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(() => (fixedCosts.length ? fixedCosts : [{ label: 'Insurance', monthly: '' }, { label: 'Truck payments', monthly: '' }, { label: 'Phone & software', monthly: '' }]).map(c => ({ ...c, monthly: String(c.monthly ?? '') })));
@@ -25,7 +27,11 @@ export default function LawnBreakdown({ jobs, rates, today, fixedCosts = [], onS
   // Regular customers who are still active (a cut coming or one in the last 30 days).
   const lawns = allLawns(jobs)
     .filter(l => l.repeatDays > 0 && l.price > 0 && (l.nextCut || (l.lastCut && dayOf(l.lastCut) >= addDays(today, -30))))
-    .map(l => ({ l, b: cutBreakdown({ price: l.price, minutes: l.avgMinutes, sqFt: l.sqFt, repeatDays: l.repeatDays, payMethod: payMethodOf(l), rates, fixedMonthly: fixed }) }))
+    .map(l => {
+      const recent = actualFor ? l.history.filter(j => j.startedAt && j.completedAt && j.earnings > 0).slice(0, 4).map(actualFor) : [];
+      const real = averageBreakdowns(recent);
+      return { l, b: real ? { ...real, price: l.price } : cutBreakdown({ price: l.price, minutes: l.avgMinutes, sqFt: l.sqFt, repeatDays: l.repeatDays, payMethod: payMethodOf(l), rates, fixedMonthly: fixed }) };
+    })
     .sort((a, b) => a.b.margin - b.b.margin);
 
   // Next 30 days, summed like one statement.
@@ -53,7 +59,7 @@ export default function LawnBreakdown({ jobs, rates, today, fixedCosts = [], onS
           <button type="button" className="btn-ghost" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <p className="cust-dim" style={{ fontSize: '12.5px' }}>
-          Costs come from the last 60 days of your books: crew pay {usd2(rates.crewPerHour)}/hr for a {rates.crewSize}-person crew, gas {usd2(rates.gasPerCut)} and mower wear {usd2(rates.wearPerCut)} per cut.
+          Lawns with timed cuts use their real numbers (who was on the truck that day, time on site, the drive over). Other costs come from the last 60 days of your books: crew pay {usd2(rates.crewPerHour)}/hr for a {rates.crewSize}-person crew, gas {usd2(rates.gasPerCut)} and mower wear {usd2(rates.wearPerCut)} per cut.
         </p>
 
         <div className="lawn-bd-top">
@@ -94,21 +100,22 @@ export default function LawnBreakdown({ jobs, rates, today, fixedCosts = [], onS
         <h4 className="lawn-bd-sub">Every lawn · lowest margin first{losers ? <span className="bad"> · {losers} losing money</span> : ''}</h4>
         <div className="lawn-bd-table">
           <table>
-            <thead><tr><th>Lawn</th><th>Price</th><th>Time</th><th>Cost</th><th>Net</th><th>Margin</th><th>Net/mo</th></tr></thead>
+            <thead><tr><th>Lawn</th><th>Price</th><th>Time</th><th>Crew</th><th>Cost</th><th>Net</th><th>Margin</th><th>Net/mo</th></tr></thead>
             <tbody>
               {lawns.map(({ l, b }) => (
                 <Fragment key={l.key}>
                   <tr className={b.net < 0 ? 'bad' : undefined} onClick={() => setOpen(open === l.key ? null : l.key)} aria-expanded={open === l.key}>
                     <td><b>{open === l.key ? '▾' : '▸'} {l.name}</b><div className="cust-dim">{String(l.address || '').split(',')[0]}</div></td>
                     <td>{usd(l.price)}</td>
-                    <td>{b.minutes}m</td>
+                    <td>{b.minutes}m{b.driveMinutes != null ? <span className="cust-dim"> +{b.driveMinutes} drive</span> : null}</td>
+                    <td>{b.actual ? <span title={`Average of the last ${b.averaged} cuts`}>{b.people}</span> : <span className="cust-dim" title="Estimate (no timed cuts yet)">est.</span>}</td>
                     <td>{usd2(b.cost)}</td>
                     <td className={b.net < 0 ? 'bad' : 'good'}>{usd2(b.net)}</td>
                     <td>{Math.round(b.margin * 100)}%</td>
                     <td>{usd(b.perMonth)}</td>
                   </tr>
                   {open === l.key && (
-                    <tr className="lawn-bd-open"><td colSpan={7}><CostSheet b={b} title={`${l.name} · per cut`} note={l.avgMinutes ? `Time is their real average (${l.avgMinutes} min on site).` : 'Time estimated from the yard size.'} /></td></tr>
+                    <tr className="lawn-bd-open"><td colSpan={8}><CostSheet b={b} title={`${l.name} · per cut`} note={b.actual ? `Actual: average of their last ${b.averaged} cut${b.averaged === 1 ? '' : 's'} (real crew that day from payroll, real time on site and driving).` : l.avgMinutes ? `Estimate: their average ${l.avgMinutes} min on site.` : 'Estimate: time from the yard size.'} /></td></tr>
                   )}
                 </Fragment>
               ))}

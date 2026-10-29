@@ -18,6 +18,7 @@ import { CREW_KINDS, EMPLOYEE_ROLES, crewKind, isLandscapingJob } from './src/li
 import { cleanItems, offerTotal, quoteMessage } from './src/lib/landscape.js';
 import { outlineReady, outlineYard } from './yardOutline.js';
 import { SITE_CHECK, applyAnswers, newChecks } from './src/lib/siteCheck.js';
+import { newNote } from './src/lib/crewNotes.js';
 import crypto from 'crypto';
 import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
 
@@ -512,7 +513,7 @@ app.put('/api/jobs/:id/status', (req, res) => {
   if (finished(status) && !finished(currentJob.status) && updatedJob.repeatDays > 0) {
     // The next visit copies the customer + schedule, never this visit's own history
     // (reminders, a check on the way, payment problems, skip notes).
-    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, regularDate: _rd, regularTech: _rt, movedAt: _ma, checks: _ck, ...carry } = updatedJob;
+    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, regularDate: _rd, regularTech: _rt, movedAt: _ma, checks: _ck, crewNotes: _cn, ...carry } = updatedJob;
     // Moved just this once? The next one is back on the regular day with the regular crew.
     const crew = updatedJob.regularTech || updatedJob.assignedTo || null;
     nextJob = {
@@ -991,6 +992,24 @@ app.post('/api/customers/questions', (req, res) => {
   if (!next) return res.status(404).json({ error: 'No upcoming visit to add the questions to.' });
   const idx = jobs.findIndex((j) => j.id === next.id);
   jobs[idx] = { ...next, checks: [...(next.checks || []), ...checks] };
+  return res.json(jobs[idx]);
+});
+
+// ---- Messages from the crew to the owner (sent from a stop) ----
+app.post('/api/jobs/:id/notes', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  const note = newNote({ kind: req.body?.kind, text: req.body?.text, by: req.body?.by || req.user?.id });
+  if (!note) return res.status(400).json({ error: 'Type what happened.' });
+  jobs[idx] = { ...jobs[idx], crewNotes: [...(jobs[idx].crewNotes || []), note].slice(-20) };
+  console.log(`[CREW NOTE] ${note.by} @ ${jobs[idx].address}: ${note.kind} ${note.text}`);
+  return res.status(201).json(jobs[idx]);
+});
+// Owner: "✓ Got it"
+app.put('/api/jobs/:id/notes/:noteId', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  jobs[idx] = { ...jobs[idx], crewNotes: (jobs[idx].crewNotes || []).map((n) => (n.id === req.params.noteId ? { ...n, read: true, readAt: new Date().toISOString() } : n)) };
   return res.json(jobs[idx]);
 });
 

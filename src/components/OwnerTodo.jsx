@@ -337,9 +337,10 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   </span>
                   <b style={{ width: '58px', textAlign: 'right' }}>{money(c.amount)}</b>
                   <span className="row-actions">
-                    {c.kind !== 'cash' && <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, false)} title="The check bounced">Bounced</button>}
-                    <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, true)}
-                      style={{ color: '#3fb950', borderColor: '#3fb95055' }} title={`Got it: mark these visits paid by ${c.kind === 'cash' ? 'cash' : 'check'}`}>{settling === c.id ? '…' : '✓ Received'}</button>
+                    {/* Real buttons, not statuses: a yield-sign "Bounced" and a solid "Received". */}
+                    {c.kind !== 'cash' && <button type="button" className="check-btn bounce" disabled={settling === c.id} onClick={() => settle(c, false)} title="Tap if the check bounced: it moves to Payment problems"><span className="yield" aria-hidden="true" />Bounced</button>}
+                    <button type="button" className="check-btn ok" disabled={settling === c.id} onClick={() => settle(c, true)}
+                      title={`Got it: mark these visits paid by ${c.kind === 'cash' ? 'cash' : 'check'}`}>{settling === c.id ? '…' : '✓ Received'}</button>
                   </span>
                 </div>
               ))}

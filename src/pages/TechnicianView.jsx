@@ -4,6 +4,7 @@ import { useJobs } from '../hooks/useJobs.js';
 import { useTechnicians } from '../hooks/useTechnicians.js';
 import JobCard from '../components/JobCard.jsx';
 import { CrewQuestions } from '../components/CrewChecks.jsx';
+import { TellOwner } from '../components/CrewNotes.jsx';
 import ExpenseModal from '../components/ExpenseModal.jsx';
 import { useExpenses } from '../hooks/useExpenses.js';
 import { useShareLocation } from '../hooks/useShareLocation.js';
@@ -106,7 +107,7 @@ const dayOf = job => job.scheduledDate || todayString();
 
 export default function TechnicianView() {
   const { activeTechId, user, setActiveTechId, demoMode } = useApp();
-  const { jobs, updateJobStatus2, crewCollect, answerChecks } = useJobs();
+  const { jobs, updateJobStatus2, crewCollect, answerChecks, sendCrewNote } = useJobs();
   const { technicians, updateTechLocation, updateTechStatus } = useTechnicians();
   const { addExpense } = useExpenses({ poll: false });
   const gps = useShareLocation(activeTechId, updateTechLocation);
@@ -332,6 +333,7 @@ export default function TechnicianView() {
                         </button>
                       ))}
                       <SkipButton disabled={isLoading || onRainDelay} onSkip={reason => handleSkip(job, reason)} />
+                      <TellOwner job={job} by={selectedTech?.name || user?.displayName || 'Crew'} onSend={sendCrewNote} />
                     </>
                   ) : null}
                 />
@@ -350,7 +352,7 @@ export default function TechnicianView() {
           <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-muted)' }}>Recently Cut</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {done.slice(0, 10).map(job => (
-              <JobCard key={job.id} job={job} actions={(job.checks?.length || doneToday.includes(job)) ? <>{job.checks?.some(c => !c.answer) && <CrewQuestions job={job} onSave={answerChecks} />}{doneToday.includes(job) ? paidActions(job) : null}</> : null} />
+              <JobCard key={job.id} job={job} actions={<>{job.checks?.some(c => !c.answer) && <CrewQuestions job={job} onSave={answerChecks} />}{doneToday.includes(job) ? paidActions(job) : null}<TellOwner job={job} by={selectedTech?.name || user?.displayName || 'Crew'} onSend={sendCrewNote} /></>} />
             ))}
           </div>
         </div>

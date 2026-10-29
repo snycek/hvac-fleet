@@ -12,6 +12,7 @@ import { COMPANY_INFO } from '../data/services.js';
 import { cleanItems, demoQuoteHash, offerTotal, quoteMessage } from '../lib/landscape.js';
 import { isLandscapingJob } from '../lib/crews.js';
 import { SITE_CHECK, newChecks } from '../lib/siteCheck.js';
+import { newNote } from '../lib/crewNotes.js';
 
 // Owner demo: two trucks working ZIP 48101 on a weekly cycle (Mon–Fri, 16 lawns
 // per truck per day). Each truck drives real road paths "En Route", switches to
@@ -402,6 +403,20 @@ function lotJob(lot) {
     quote: lotOutline(lot),
   };
 }
+
+// Demo crew: about 1 stop in 30, the foreman sends the owner a message.
+const DEMO_NOTES = [
+  ['missed', 'The strip behind the shed isn\'t on the outline, about 400 sq ft more. Cut it anyway.'],
+  ['request', 'Customer asked us to bag the clippings from now on.'],
+  ['access', 'Back gate was locked. Cut the front only.'],
+  ['damage', 'Sprinkler head by the driveway is broken (was like that when we got here).'],
+  ['missed', 'Side yard on the north side is grass now, not beds. Should go on the quote.'],
+];
+const demoNoteFor = (key, by, at) => {
+  if (hash(`${key}✉`) % 30 !== 0) return null;
+  const [kind, text] = DEMO_NOTES[hash(`${key}✉✉`) % DEMO_NOTES.length];
+  return newNote({ kind, text, by }, at);
+};
 
 // Demo crew: answers the owner's questions when the truck reaches the stop.
 function demoAnswer(c, key) {
@@ -904,7 +919,9 @@ export function useDemoSim(start = {}) {
           newBursts.push({ id: `${jobId}-${Date.now()}`, lat: target.lat, lng: target.lng, text: '📋 answered', at: Date.now() });
           lastEvent = `📋 ${name} answered the site check · ${target.name}`;
         } else {
-          setJob(jobId, { status: 'completed', startedAt: iso(started), completedAt: iso(finished), paid: false, paidAt: null, payOn: addDays(today, payDelay(jobId)), ...answered });
+          const note = plow ? null : demoNoteFor(jobId, driverOf(w, t).name, iso(finished));
+          setJob(jobId, { status: 'completed', startedAt: iso(started), completedAt: iso(finished), paid: false, paidAt: null, payOn: addDays(today, payDelay(jobId)), ...answered, ...(note ? { crewNotes: [...(doneJob?.crewNotes || []), note] } : {}) });
+          if (note) lastEvent = `💬 ${name}: ${note.text.slice(0, 40)}…`;
           const tag = plow ? '❄️ ' : land ? '🌳 ' : '';
           newBursts.push({ id: `${jobId}-${Date.now()}`, lat: target.lat, lng: target.lng, text: `${tag}+$${target.price}`, at: Date.now() });
           lastEvent = answered.checks ? `📋 ${name} answered your questions · ${target.name}` : `${tag}+$${target.price} · ${target.name}`;
@@ -1160,6 +1177,12 @@ export function useDemoSim(start = {}) {
     return visit;
   }, [commitWorld]);
   // A customer: the questions ride on their next cut (today's, if it's still open).
+  // Owner read a crew message.
+  const markNoteRead = useCallback(async (jobId, noteId) => {
+    const w = worldRef.current;
+    commitWorld({ ...w, jobs: w.jobs.map(j => (j.id === jobId ? { ...j, crewNotes: (j.crewNotes || []).map(n => (n.id === noteId ? { ...n, read: true } : n)) } : j)) });
+  }, [commitWorld]);
+
   const askCrewNextVisit = useCallback(async (key, questions) => {
     const w = worldRef.current;
     const checks = newChecks(questions);
@@ -1316,7 +1339,7 @@ export function useDemoSim(start = {}) {
     planRoutes,
     scheduleQuote,
     lawnPlan, moveLawn,
-    askCrewSiteCheck, askCrewNextVisit,
+    askCrewSiteCheck, askCrewNextVisit, markNoteRead,
     sendLandscapeQuote, acceptLandscapeQuote,
     declineQuote,
     payments: world.payments || [],

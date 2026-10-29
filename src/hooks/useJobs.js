@@ -273,6 +273,9 @@ export function useJobs({ live = true } = {}) {
   const askCrewSiteCheck = useCallback((quoteId, plan) => postJson(`/api/jobs/${quoteId}/site-check`, 'POST', plan), []);
   const askCrewNextVisit = useCallback((key, questions) => postJson('/api/customers/questions', 'POST', { key, questions }), []);
   const answerChecks = useCallback((jobId, answers) => postJson(`/api/jobs/${jobId}/checks`, 'PUT', { answers }), []);
+  // Crew → owner messages, and the owner's "✓ Got it".
+  const sendCrewNote = useCallback((jobId, note) => postJson(`/api/jobs/${jobId}/notes`, 'POST', note), []);
+  const markNoteRead = useCallback((jobId, noteId) => postJson(`/api/jobs/${jobId}/notes/${noteId}`, 'PUT', {}), []);
 
   // Owner moves a lawn's next cut: { scheduledDate, techId, mode: 'once' | 'always' }.
   const rescheduleJob = useCallback(async (jobId, plan) => {
@@ -310,5 +313,5 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, [reloadJobs]);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, askCrewSiteCheck, askCrewNextVisit, answerChecks, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, askCrewSiteCheck, askCrewNextVisit, answerChecks, sendCrewNote, markNoteRead, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
 }

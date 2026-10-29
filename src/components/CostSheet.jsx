@@ -10,9 +10,9 @@ export default function CostSheet({ b, title = 'Per cut', note }) {
       {b.lines.map(l => (
         <div key={l.label} className={l.muted ? 'cost-row muted' : 'cost-row'}><span>− {l.label}</span><span>{l.muted ? '—' : usd(l.amount)}</span></div>
       ))}
-      <div className={`cost-row total ${good ? 'good' : 'bad'}`}><span>= Net per cut</span><span>{usd(b.net)} <small>({Math.round(b.margin * 100)}%)</small></span></div>
-      <div className="cost-row sub"><span>Per month · ~{b.cutsPerMonth.toFixed(1)} cuts</span><span>{usd(b.perMonth)}</span></div>
-      <div className="cost-row sub"><span>Per season</span><span>{usd(b.perSeason)}</span></div>
+      <div className={`cost-row total ${good ? 'good' : 'bad'}`}><span>= Net{b.oneTime ? '' : ' per cut'}</span><span>{usd(b.net)} <small>({Math.round(b.margin * 100)}%)</small></span></div>
+      {b.perMonth != null && <div className="cost-row sub"><span>Per month · ~{b.cutsPerMonth.toFixed(1)} cuts</span><span>{usd(b.perMonth)}</span></div>}
+      {b.perSeason != null && <div className="cost-row sub"><span>Per season</span><span>{usd(b.perSeason)}</span></div>}
       {note && <div className="cost-note">{note}</div>}
     </div>
   );

@@ -149,3 +149,22 @@ export function payHistory(employee, { jobs, shifts, delays, settings }, today =
   }
   return out;
 }
+
+/**
+ * Who was on a crew's truck on a date: the people with payroll hours that day (an owner's
+ * edit to 0 = they were off). Returns a function (crewId, date) → { people: [names], perHour }.
+ * Cached per crew + week, so it's cheap to call for many visits.
+ */
+export function makeCrewOnDay({ employees, jobs, shifts, delays, settings }) {
+  const cache = new Map();
+  return (crewId, date) => {
+    const week = weekDates(date);
+    const key = `${crewId}@${week[0]}`;
+    if (!cache.has(key)) {
+      const crew = employees.filter(e => e.crewId === crewId);
+      cache.set(key, buildPayroll({ employees: crew, week, jobs, shifts, delays, settings }));
+    }
+    const rows = cache.get(key).filter(r => (r.days.find(d => d.date === date)?.hours || 0) > 0);
+    return { people: rows.map(r => r.employee.name), perHour: rows.reduce((s, r) => s + (r.employee.rate || 0), 0) };
+  };
+}

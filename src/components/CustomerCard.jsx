@@ -1,8 +1,9 @@
 import { lawnKey } from '../lib/lawns.js';
 import AskCrewModal from './AskCrewModal.jsx';
+import CostSheet from './CostSheet.jsx';
 import { CrewAnswers } from './CrewChecks.jsx';
 import { checksAt, isSiteCheck } from '../lib/siteCheck.js';
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { customerHistory, methodLabel, nextReminderDate } from '../lib/customers.js';
 import { CONTACT_METHODS } from '../lib/billing.js';
@@ -23,7 +24,8 @@ const contactKind = c => (c.kind === 'heads_up' ? 'on-the-way text (automatic)' 
  * Everything about one customer (by service address): balance, payments (incl. declined
  * cards), every reminder sent with its exact wording (audit trail), and all visits.
  */
-export default function CustomerCard({ customerKey, jobs, payments, today, settings, onClose, onRemind, onPrint, onUpdate, technicians = [], onAskCrew = null }) {
+export default function CustomerCard({ customerKey, jobs, payments, today, settings, onClose, onRemind, onPrint, onUpdate, technicians = [], onAskCrew = null, costFor = null }) {
+  const [costOpen, setCostOpen] = useState(null); // visit id showing its actual breakdown
   const [asking, setAsking] = useState(false);
   const crewChecks = useMemo(() => checksAt(jobs, customerKey, lawnKey), [jobs, customerKey]);
   const nextVisit = useMemo(() => jobs
@@ -200,10 +202,11 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
 
           {tab === 'visits' && (
             <table className="cust-table">
-              <thead><tr><th>Date</th><th>Service</th><th>Amount</th><th>Status</th></tr></thead>
+              <thead><tr><th>Date</th><th>Service</th><th>Amount</th><th>Status</th>{costFor && <th title="What each cut actually made">$</th>}</tr></thead>
               <tbody>
                 {h.visits.map(v => (
-                  <tr key={v.id}>
+                  <Fragment key={v.id}>
+                  <tr>
                     <td>{day(v.date)}</td>
                     <td>{v.service}<div className="cust-dim">{v.invoiceNo}</div></td>
                     <td>{usd(v.amount)}</td>
@@ -216,7 +219,32 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
                       {v.status === 'upcoming' && <span className="cust-dim">Scheduled</span>}
                       {v.status === 'skipped' && <span className="cust-dim">⏭ Skipped{v.skipReason ? ` · ${v.skipReason}` : ''} · no charge</span>}
                     </td>
+                    {costFor && (() => {
+                      const c = costFor(jobs.find(j => j.id === v.id) || {});
+                      if (!c) return <td />;
+                      const diff = c.estimate ? c.actual.net - c.estimate.net : null;
+                      return (
+                        <td>
+                          {/* Just a $: green = made money, red = lost money. Tap for the breakdown. */}
+                          <button type="button" className={`net-btn ${c.actual.net >= 0 ? 'good' : 'bad'}`} aria-expanded={costOpen === v.id}
+                            onClick={() => setCostOpen(costOpen === v.id ? null : v.id)}
+                            title={`Net ${usd(c.actual.net)}${diff != null ? ` (${diff >= 0 ? '+' : '−'}${usd(Math.abs(diff))} vs. estimate)` : ''}: tap for what this cut actually cost`}>$</button>
+                        </td>
+                      );
+                    })()}
                   </tr>
+                  {costFor && costOpen === v.id && (() => {
+                    const c = costFor(jobs.find(j => j.id === v.id) || {});
+                    return c && (
+                      <tr><td colSpan={5}>
+                        <CostSheet b={c.actual} title={`Actual · ${c.actual.crew.length ? c.actual.crew.join(', ') : `${c.actual.people} people`}`}
+                          note={c.estimate
+                            ? `Estimate was ${usd(c.estimate.net)} (${c.estimate.lines[0].label.replace('Crew labor · ', '')}, ~${c.estimate.lines[1].label.match(/\d+/)?.[0] || 6} min drive).`
+                            : 'One-time job: the real crew, time on site and drive for this visit.'} />
+                      </td></tr>
+                    );
+                  })()}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

@@ -29,7 +29,7 @@ import { COMPANY_INFO } from '../data/services.js';
 import { billingMode, demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
 import { addDays, formatDay, todayString } from '../lib/dates.js';
-import { dayOf, hoursMins, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
+import { dayOf, jobDay, lawnKey, money, periodRange, profitAndLoss, rainMinutes } from '../lib/lawns.js';
 
 // Stable no-op so memoized panels don't re-render in demo mode.
 const noop = async () => {};
@@ -331,10 +331,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
       { label: 'Expenses', value: money(stats.month.expenseTotal) },
       { label: 'Net', value: money(stats.month.net), color: stats.month.net >= 0 ? '#3fb950' : '#ff7b72' },
     ] },
-    { title: 'Crew', tiles: [
-      { label: 'On duty', value: `${stats.onDuty}/${stats.crewSize}` },
-      { label: 'Rain · month', value: stats.rainMonth ? hoursMins(stats.rainMonth) : '0m', color: stats.rainMonth ? '#58a6ff' : undefined },
-    ] },
+    // (Crew "On duty" / "Rain · month" tiles removed: they took space without helping.
+    // Rain delays still show on the live map and in each truck's route.)
   ];
 
   const seg = { display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', height: '30px' };

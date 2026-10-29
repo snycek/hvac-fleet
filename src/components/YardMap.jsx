@@ -30,8 +30,10 @@ function nextZoneName(zones, names = ZONE_NAME_SUGGESTIONS) {
  */
 // zoneNames: the order new zones are named in (snow quotes start with Parking Lot).
 // onPickPoint: when set, the next tap on the map is handed back ({ lat, lng }) instead of
-// drawing or selecting (the quote tool's "tap your house" before auto-outlining).
-export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null }) {
+// drawing or selecting.
+// crosshair + onMoveEnd: a ✛ target in the middle of the map, and the map's center
+// ({ lat, lng }) each time it stops moving (the quote tool re-outlines the house under it).
+export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null, crosshair = false, onMoveEnd = null }) {
   const zoneNamesRef = useRef(zoneNames);
   useEffect(() => { zoneNamesRef.current = zoneNames; }, [zoneNames]);
   const containerRef = useRef(null);
@@ -44,7 +46,7 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
   // Latest values for Leaflet event handlers.
   const live = useRef({});
   const zoneLabel = (name, points) => (showArea ? `<b>${name}</b><br>${formatSqFt(areaSqFt(points))}` : `<b>${name}</b>`);
-  live.current = { mode, draft, zones, onZonesChange, onSelect, onPickPoint };
+  live.current = { mode, draft, zones, onZonesChange, onSelect, onPickPoint, onMoveEnd };
 
   // Create the map once.
   useEffect(() => {
@@ -60,6 +62,11 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     if (!getMapKey()) loadMapKey().then(k => { if (k) tiles.setUrl(satelliteTileUrl(k)); });
     layerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
+
+    map.on('moveend', () => {
+      const c = map.getCenter();
+      live.current.onMoveEnd?.({ lat: c.lat, lng: c.lng, zoom: map.getZoom() });
+    });
 
     map.on('click', (e) => {
       const { mode: m, onSelect: select, onPickPoint: pick } = live.current;
@@ -258,10 +265,13 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
           )}
         </div>
       )}
-      <div
-        ref={containerRef}
-        style={{ height, width: '100%', borderRadius: '10px', border: '1px solid var(--border)', overflow: 'hidden', background: '#111' }}
-      />
+      <div style={{ position: 'relative' }}>
+        <div
+          ref={containerRef}
+          style={{ height, width: '100%', borderRadius: '10px', border: '1px solid var(--border)', overflow: 'hidden', background: '#111' }}
+        />
+        {crosshair && mode !== 'drawing' && <div className="map-crosshair" aria-hidden="true" />}
+      </div>
     </div>
   );
 }

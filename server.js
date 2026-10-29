@@ -312,7 +312,7 @@ const TO_PHONE = process.env.TO_PHONE || '+13133789982';
 // ---- "✨ Outline my yard" (public: customers use it in the quote tool) ----
 // Each call costs a few cents, so: a few per visitor per hour, a daily cap for the whole
 // site, and the same address isn't outlined twice in a day.
-const OUTLINE_PER_IP_HOUR = 6;
+const OUTLINE_PER_IP_HOUR = 12; // moving the ✛ to another roof re-outlines
 const OUTLINE_PER_DAY = Number(process.env.OUTLINE_PER_DAY) || 150;
 const outlineHits = new Map(); // ip → [timestamps]
 const outlineCache = new Map(); // 'lat,lng' (≈1 m) → { at, result }
@@ -329,7 +329,8 @@ app.post('/api/yard-outline', async (req, res) => {
   const lng = Number(req.body?.lng);
   // Stay roughly in the service area (Downriver Michigan).
   if (!(lat > 41.5 && lat < 43 && lng > -84.5 && lng < -82.5)) return res.status(400).json({ error: 'That spot is outside our service area.' });
-  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  const tapped = req.body?.tapped !== false; // false: the typed address (outlined as soon as the map opens)
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)},${tapped ? 't' : 'a'}`;
   const cached = outlineCache.get(key);
   if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return res.json(cached.result);
 
@@ -343,7 +344,7 @@ app.post('/api/yard-outline', async (req, res) => {
   outlineDay.count += 1;
 
   try {
-    const { zones, note, usage } = await outlineYard({ lat, lng });
+    const { zones, note, usage } = await outlineYard({ lat, lng, tapped });
     const result = { zones, note };
     outlineCache.set(key, { at: Date.now(), result });
     console.log(`[OUTLINE] ${key} → ${zones.length} zones (${usage?.input_tokens || 0} in / ${usage?.output_tokens || 0} out)`);

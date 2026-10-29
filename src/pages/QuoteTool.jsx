@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import YardMap from '../components/YardMap.jsx';
 import AddressInput from '../components/AddressInput.jsx';
 import { COMPANY_INFO } from '../data/services.js';
@@ -75,24 +75,62 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     fetch('/api/yard-outline').then(r => (r.ok ? r.json() : null)).then(d => { if (!off) setOutlineOn(Boolean(d?.ready)); }).catch(() => {});
     return () => { off = true; };
   }, []);
-  // Typed addresses can land on the street or a neighbor's lot, so the customer taps
-  // their own roof first; the photo is centered on that spot.
-  const autoOutline = async (house) => {
+  // Runs by itself from the typed address as soon as the map opens. Addresses can land
+  // on the street or a neighbor's lot, so "Wrong house?" lets them tap their own roof.
+  // An automatic run never replaces zones they've started drawing themselves.
+  const autoOutline = async (house, { tapped = true } = {}) => {
     if (!house?.lat) return;
-    setOutline({ state: 'busy', msg: '' });
+    lastOutlined.current = { lat: house.lat, lng: house.lng };
+    setOutline({ state: 'busy', msg: '', tapped });
     try {
-      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng }) });
+      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng, tapped }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not outline it automatically.');
       if (!data.zones?.length) throw new Error(data.note || "We couldn't spot your lawn in the photo. Tap Draw a Zone to outline it yourself.");
       const stamp = Date.now();
-      setZones(data.zones.map((z, i) => ({ id: `auto-${stamp}-${i}`, name: z.name, color: ZONE_COLORS[i % ZONE_COLORS.length], points: z.points })));
+      const auto = data.zones.map((z, i) => ({ id: `auto-${stamp}-${i}`, name: z.name, color: ZONE_COLORS[i % ZONE_COLORS.length], points: z.points }));
+      setZones(cur => {
+        if (!tapped && cur.some(z => !String(z.id).startsWith('auto-'))) return cur;
+        autoShapes.current = JSON.stringify(auto);
+        return auto;
+      });
       setSelectedId(null);
-      setOutline({ state: 'done', msg: data.note || 'Outlined your lawn. Tap a zone to drag its corners.' });
+      setOutline({ state: 'done', tapped, msg: data.note || 'Outlined your lawn. Tap a zone to drag its corners.' });
     } catch (err) {
       setOutline({ state: 'error', msg: err.message });
     }
   };
+
+  // Outline from the typed address as soon as the map opens (once per address). Skipped
+  // when only the street was found or they're finding the house on the map themselves.
+  const autoRan = useRef('');
+  useEffect(() => {
+    if (step !== 'map' || !outlineOn || snow || !center?.lat || center.manual || center.approx) return;
+    const at = `${center.lat},${center.lng}`;
+    if (autoRan.current === at || zones.length) return;
+    autoRan.current = at;
+    autoOutline(center, { tapped: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, outlineOn, snow, center?.lat, center?.lng]);
+
+  // Moving the map: when it stops (~2 s) with the ✛ somewhere new (15 m+ from the last
+  // outline), outline the house under the ✛. Their own hand-drawn zones are never replaced.
+  const lastOutlined = useRef(null);
+  const lastMapCenter = useRef(null);
+  const autoShapes = useRef(''); // the zones as the last outline returned them
+  const moveTimer = useRef(null);
+  const metersApart = (a, b) => Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180));
+  const onMapMoved = c => {
+    lastMapCenter.current = { lat: c.lat, lng: c.lng };
+    clearTimeout(moveTimer.current);
+    if (!outlineOn || snow || outline.state === 'busy' || c.zoom < 18) return;
+    if (zones.some(z => !String(z.id).startsWith('auto-'))) return; // they're drawing their own
+    if (autoShapes.current && JSON.stringify(zones) !== autoShapes.current) return; // they've adjusted corners
+    const ref = lastOutlined.current || center;
+    if (ref && metersApart(ref, c) < 15) return;
+    moveTimer.current = setTimeout(() => autoOutline({ lat: c.lat, lng: c.lng }, { tapped: true }), 2000);
+  };
+  useEffect(() => () => clearTimeout(moveTimer.current), []);
 
   const renameZone = (id, name) => setZones(zs => zs.map(z => (z.id === id ? { ...z, name } : z)));
   const deleteZone = id => {
@@ -251,14 +289,15 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           {outline.state === 'picking' ? (
             <button type="button" className="btn-ghost" onClick={() => setOutline({ state: 'idle', msg: '' })}>Cancel</button>
           ) : (
-            <button type="button" className="btn-primary" onClick={() => setOutline({ state: 'picking', msg: '' })} disabled={outline.state === 'busy'}>
-              {outline.state === 'busy' ? '✨ Finding your lawn…' : zones.length ? '✨ Outline it for me again' : '✨ Outline my yard for me'}
+            <button type="button" className="btn-primary" onClick={() => { const m = lastMapCenter.current || center; if (m) autoOutline(m, { tapped: true }); }} disabled={outline.state === 'busy'}>
+              {outline.state === 'busy' ? '✨ Finding your lawn…' : '✨ Outline the house under the ✛'}
             </button>
           )}
           <span>
             {outline.state === 'picking' ? <b style={{ color: 'var(--text-primary)' }}>👆 Now tap the roof of your house on the map.</b>
-              : outline.state === 'busy' ? 'Looking at the satellite photo. This takes about 20 seconds.'
-                : outline.msg || 'Tap the button, then tap your roof. We trace your lawn from the satellite photo, and you can fix any corner after.'}
+              : outline.state === 'busy' ? 'Outlining your lawn from the satellite photo. This takes about 15 seconds.'
+                : outline.state === 'done' ? `${outline.msg} Wrong house? Drag the map so the ✛ is on your roof and it redoes it. Drag any corner to fix an edge.`
+                  : outline.msg || 'Drag the map so the ✛ is on your roof, and we outline your lawn from the satellite photo. You can fix any corner after.'}
           </span>
         </div>
       )}
@@ -274,6 +313,8 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             showArea={false}
             zoneNames={snowOnly ? SNOW_ZONE_NAMES : undefined}
             onPickPoint={outline.state === 'picking' ? autoOutline : null}
+            crosshair={outlineOn && !snow}
+            onMoveEnd={onMapMoved}
           />
         </div>
 

@@ -116,14 +116,17 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
 
     zones.forEach(zone => {
       const selected = zone.id === selectedId;
+      // "Don't cut" areas: grey and dashed.
+      const color = zone.skip ? '#8b949e' : zone.color;
       const poly = L.polygon(zone.points, {
-        color: zone.color,
+        color,
         weight: selected ? 4 : 2,
-        fillColor: zone.color,
-        fillOpacity: selected ? 0.4 : 0.28,
+        dashArray: zone.skip ? '6 5' : null,
+        fillColor: color,
+        fillOpacity: zone.skip ? 0.12 : selected ? 0.4 : 0.28,
         interactive: !drawing && !readOnly,
       }).addTo(group);
-      poly.bindTooltip(zoneLabel(zone.name, zone.points), {
+      poly.bindTooltip(zone.skip ? `🚫 ${zone.name}<br>don't cut` : zoneLabel(zone.name, zone.points), {
         permanent: true, direction: 'center', className: 'zone-label',
       });
       poly.on('click', (e) => {

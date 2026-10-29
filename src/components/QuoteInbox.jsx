@@ -3,11 +3,13 @@ import YardMap from './YardMap.jsx';
 import { COMPANY_INFO } from '../data/services.js';
 import { addressFor, remindBy } from '../lib/billing.js';
 import { arrivalMessage } from '../lib/notify.js';
-import { formatPrice, formatSqFt } from '../lib/zones.js';
+import { cutSqFt, formatPrice, formatSqFt, priceForCut, skippedZones, withSkips } from '../lib/zones.js';
 import { REPEAT_OPTIONS, addDays, formatDay, todayString } from '../lib/dates.js';
 import { bestPerDay, fmtMiles } from '../lib/routeFit.js';
 import { crewKind, isLandscapingJob, wantsLandscaping } from '../lib/crews.js';
 import LandscapeQuoteModal from './LandscapeQuoteModal.jsx';
+import CostSheet from './CostSheet.jsx';
+import { cutBreakdown, fixedMonthlyTotal } from '../lib/jobCost.js';
 import { directionsLinks, driveEstimate, fmtDrive, metersBetween, nearestTruck } from '../lib/distance.js';
 
 // How far the address is: nearest truck out now (for landscaping, the nearest landscaping
@@ -61,7 +63,10 @@ const isSnow = job => requestedServices(job).includes('Snow Removal');
 const crewFor = (job, techs) => techs.filter(t => crewKind(t) === (isSnow(job) ? 'plow' : 'lawn'));
 const usd = n => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
 
-function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoutes, today = todayString() }) {
+function AddCustomerModal({ job, skip = [], foremen: allForemen, onSave, onClose, planRoutes, today = todayString() }) {
+  const keptZones = withSkips(job.quote?.zones, skip);
+  const leftOff = skippedZones(keptZones);
+  const quotedForCut = job.quote?.estimate != null ? priceForCut(job.quote.estimate, keptZones) : null;
   const requested = requestedServices(job);
   const snow = isSnow(job);
   const foremen = crewFor(job, allForemen).length ? crewFor(job, allForemen) : allForemen;
@@ -71,7 +76,7 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
   const [slotKey, setSlotKey] = useState(best?.key || null);
   const slot = options.find(o => o.key === slotKey) || null;
   const days = bestPerDay(options);
-  const [price, setPrice] = useState(String(job.quote?.estimate ?? job.earnings ?? ''));
+  const [price, setPrice] = useState(String(quotedForCut ?? job.earnings ?? ''));
   const [date, setDate] = useState(best?.date || addDays(today, 1));
   // Snow: dispatched every time it snows, not on a fixed repeat.
   const [repeatDays, setRepeatDays] = useState(requested.includes('Lawn Cutting') && !snow ? 7 : 0);
@@ -102,6 +107,7 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
         techId,
         service: requested.join(', ') || 'Lawn Service',
         notifyArrival,
+        ...(skip.length ? { skipZones: skip } : {}),
         ...(slot && slot.techId === techId ? { slot: { key: slot.key, day: slot.day, techId: slot.techId, index: slot.index } } : {}),
       });
     } catch (err) {
@@ -129,10 +135,13 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
               They outlined {formatSqFt(job.quote.totalSqFt)} to plow.
             </div>
           )}
-          {job.quote?.estimate != null && Number(price) !== job.quote.estimate && (
+          {leftOff.length > 0 && (
+            <div className="zone-left-off">🚫 Not cutting {leftOff.map(z => z.name).join(', ')} · price is for {formatSqFt(cutSqFt(keptZones))}</div>
+          )}
+          {quotedForCut != null && Number(price) !== quotedForCut && (
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-              Website quoted {formatPrice(job.quote.estimate)}.{' '}
-              <button type="button" onClick={() => setPrice(String(job.quote.estimate))} style={{ background: 'none', border: 'none', color: 'var(--accent-teal)', cursor: 'pointer', padding: 0, fontSize: '12px' }}>Reset</button>
+              Website quoted {formatPrice(quotedForCut)}.{' '}
+              <button type="button" onClick={() => setPrice(String(quotedForCut))} style={{ background: 'none', border: 'none', color: 'var(--accent-teal)', cursor: 'pointer', padding: 0, fontSize: '12px' }}>Reset</button>
             </div>
           )}
         </div>
@@ -231,15 +240,18 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
   );
 }
 
-function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onShowOnMap }) {
+function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onShowOnMap, skip = [], onToggleZone, rates, fixedCosts }) {
+  const [showCost, setShowCost] = useState(false);
   const requested = requestedServices(job);
   // Landscaping: John prices it and it goes back to the customer to accept.
   const land = wantsLandscaping(job);
   const landOnly = isLandscapingJob(job);
   const first = job.clientName.split(' ')[0];
   const smsBody = encodeURIComponent(`Hi ${first}, this is ${COMPANY_INFO.name} about your quote for ${requested.join(', ').toLowerCase() || 'lawn service'}.`);
-  const quote = job.quote;
+  // Areas John marked "Don't cut" come off the map's color and the price.
+  const quote = job.quote ? { ...job.quote, zones: withSkips(job.quote.zones, skip) } : null;
   const zones = quote?.zones?.map((z, i) => ({ ...z, id: `${job.id}-z${i}` })) || [];
+  const price = quote?.estimate != null ? priceForCut(quote.estimate, quote.zones) : null;
 
   return (
     <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -253,8 +265,8 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{landOnly ? '🌳 You price it' : quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(quote.estimate)) : '—'}</div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(quote.totalSqFt)} · quoted ${timeAgo(job.createdAt, now)}` : `Not measured · ${timeAgo(job.createdAt, now)}`}</div>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{landOnly ? '🌳 You price it' : quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(price)) : '—'}</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(skip.length ? cutSqFt(quote.zones) : quote.totalSqFt)}${skip.length ? ` (was ${formatPrice(quote.estimate)})` : ''} · quoted ${timeAgo(job.createdAt, now)}` : `Not measured · ${timeAgo(job.createdAt, now)}`}</div>
         </div>
       </div>
 
@@ -262,12 +274,15 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
         <div>📞 <a href={`tel:${digits(job.clientPhone)}`} style={{ color: 'var(--text-primary)' }}>{job.clientPhone}</a>{job.clientEmail || job.email ? <> · ✉️ <a href={`mailto:${job.clientEmail || job.email}`} style={{ color: 'var(--text-primary)' }}>{job.clientEmail || job.email}</a></> : null}</div>
         <div>📍 {job.address}</div>
         {quote?.zones?.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+          <div className="zone-toggles">
             {quote.zones.map((z, i) => (
-              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: z.color }} />{z.name}: {formatSqFt(z.sqFt)}
-              </span>
+              <button key={i} type="button" className={z.skip ? 'zone-toggle off' : 'zone-toggle'} aria-pressed={!z.skip}
+                onClick={() => onToggleZone?.(i)} title={z.skip ? 'Tap to cut this area again' : "Tap if they don't want this area cut"}>
+                <span style={{ background: z.skip ? 'transparent' : z.color, borderColor: z.color }} />
+                {z.skip ? '🚫 ' : ''}{z.name}: {formatSqFt(z.sqFt)}{z.skip ? " · don't cut" : ''}
+              </button>
             ))}
+            {quote.zones.length > 1 && <span className="cust-dim zone-hint">{skip.length ? `${skippedZones(quote.zones).length} area${skip.length === 1 ? '' : 's'} left off the price` : "Tap an area to leave it off (\"don't cut\")."}</span>}
           </div>
         )}
         {job.notes && !/^Measured |^Skipped measuring/.test(job.notes) && <div>📝 {job.notes}</div>}
@@ -275,6 +290,12 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
       </div>
 
       <QuoteDistance job={job} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap} />
+
+      {/* What this job would make after costs — only when John asks for it. */}
+      {rates && price > 0 && showCost && (
+        <CostSheet b={cutBreakdown({ price, sqFt: cutSqFt(quote.zones), repeatDays: 7, rates, fixedMonthly: fixedMonthlyTotal(fixedCosts) })}
+          title={`If they're cut weekly at ${formatPrice(price)}`} note="Time on site is estimated from the outlined area; costs come from your last 60 days." />
+      )}
 
       {zones.length > 0 ? (
         <div className="quote-yard"><YardMap zones={zones} readOnly height="240px" /></div>
@@ -288,6 +309,9 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
         <a className="btn-ghost" href={`tel:${digits(job.clientPhone)}`} style={{ textDecoration: 'none', padding: '9px 14px', fontSize: '13px' }}>📞 Call</a>
         <a className="btn-ghost" href={`sms:${digits(job.clientPhone)}?&body=${smsBody}`} style={{ textDecoration: 'none', padding: '9px 14px', fontSize: '13px' }}>💬 Text</a>
         <span style={{ flex: 1 }} />
+        {rates && price > 0 && (
+          <button type="button" className="btn-ghost" aria-pressed={showCost} onClick={() => setShowCost(s => !s)} style={{ padding: '9px 14px', fontSize: '13px' }}>📊 {showCost ? 'Hide breakdown' : 'Breakdown'}</button>
+        )}
         <button type="button" className="btn-ghost" onClick={onDecline} style={{ padding: '9px 14px', fontSize: '13px', color: '#ff7b72' }}>Decline</button>
         {land && (
           <button type="button" className={`${landOnly ? 'btn-primary' : 'btn-ghost'} land-price`} onClick={onPriceLand} style={{ padding: '9px 16px', fontSize: '13px' }}
@@ -301,9 +325,14 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
 
 /** New quotes waiting for a yes/no (part of the owner's To-Do). */
 // trucks: with live locations (for "how far"). shop: { lat, lng } or null. onShowOnMap(job).
-export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote, trucks = technicians, shop = null, onShowOnMap = null }) {
+export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote, trucks = technicians, shop = null, onShowOnMap = null, costRates = null, fixedCosts = [] }) {
   const [adding, setAdding] = useState(null);
   const [pricing, setPricing] = useState(null); // landscaping request being priced
+  const [skips, setSkips] = useState({}); // jobId → zone indexes marked "don't cut"
+  const toggleZone = (jobId, i) => setSkips(s => {
+    const cur = s[jobId] || [];
+    return { ...s, [jobId]: cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i] };
+  });
   const sent = jobs.filter(j => j.status === 'quote_sent').sort((a, b) => String(b.offer?.sentAt).localeCompare(String(a.offer?.sentAt)));
   const landCrews = technicians.filter(t => crewKind(t) === 'landscape' && t.status !== 'pending_approval');
   const [toast, setToast] = useState('');
@@ -362,7 +391,8 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
       {quotes.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
           {quotes.map(job => (
-            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap} />
+            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap}
+              skip={skips[job.id] || []} onToggleZone={i => toggleZone(job.id, i)} rates={costRates} fixedCosts={fixedCosts} />
           ))}
         </div>
       )}
@@ -394,7 +424,7 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
       )}
 
       {adding && (
-        <AddCustomerModal job={adding} foremen={foremen} onSave={handleSave} onClose={() => setAdding(null)} planRoutes={planRoutes} today={today} />
+        <AddCustomerModal job={adding} skip={skips[adding.id] || []} foremen={foremen} onSave={handleSave} onClose={() => setAdding(null)} planRoutes={planRoutes} today={today} />
       )}
     </div>
   );

@@ -38,6 +38,21 @@ export function areaSqFt(points) {
 // Instant estimate: $5 for every 500 sq ft, rounded up to the next full block.
 export const PRICING = { blockSqFt: 500, pricePerBlock: 5 };
 
+// ---- "Don't cut" areas ----
+// The owner can leave an outlined area off (zone.skip): greyed on maps, not in the price,
+// and the crew sees "Don't cut: …" on the stop.
+export const SKIP_COLOR = '#8b949e';
+export const cutSqFt = zones => (zones || []).filter(z => !z.skip).reduce((s, z) => s + (z.sqFt || 0), 0);
+export const skippedZones = zones => (zones || []).filter(z => z.skip);
+/** Zones with the skip list applied (indexes). */
+export const withSkips = (zones, skip = []) => (zones || []).map((z, i) => (skip.includes(i) ? { ...z, skip: true } : { ...z, skip: false }));
+/** The quoted price for just the areas being cut (same rate per sq ft), to the nearest $5. */
+export function priceForCut(estimate, zones) {
+  const all = (zones || []).reduce((s, z) => s + (z.sqFt || 0), 0);
+  if (!estimate || !all) return estimate || 0;
+  return Math.max(5, Math.round((estimate * cutSqFt(zones)) / all / 5) * 5);
+}
+
 export function estimatePrice(totalSqFt) {
   if (!totalSqFt) return 0;
   return Math.ceil(totalSqFt / PRICING.blockSqFt) * PRICING.pricePerBlock;

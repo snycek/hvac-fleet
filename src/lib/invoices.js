@@ -16,10 +16,14 @@ export const serviceDate = job => dayOf(job.completedAt) || job.scheduledDate ||
 // Regular customers get one statement a month (every visit that month), sent on the
 // billing day of the next month and due `terms` days later. One-time jobs are billed
 // per visit (due `terms` days after the visit). A customer can be switched either way.
-export const BILLING_DEFAULTS = { day: 1, terms: DUE_DAYS };
+export const BILLING_DEFAULTS = { day: 1, terms: DUE_DAYS, fixedCosts: [] };
 export const billingSettings = s => ({
   day: Math.min(28, Math.max(1, Number(s?.day) || BILLING_DEFAULTS.day)),
   terms: Math.min(90, Math.max(0, Number(s?.terms ?? BILLING_DEFAULTS.terms))),
+  // John's fixed monthly costs for the P/L breakdown: [{ label, monthly }]
+  fixedCosts: (Array.isArray(s?.fixedCosts) ? s.fixedCosts : [])
+    .map(c => ({ label: String(c?.label || '').trim().slice(0, 40), monthly: Math.round(Math.max(0, Number(c?.monthly) || 0) * 100) / 100 }))
+    .filter(c => c.label && c.monthly > 0).slice(0, 20),
 });
 /** 'monthly' | 'visit' */
 export const billingMode = job => (job.billing === 'visit' || job.billing === 'monthly'

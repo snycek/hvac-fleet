@@ -70,6 +70,9 @@ export default function JobCard({ job, actions, expanded = false, onClick }) {
         </div>
       </div>
 
+      {quote?.zones?.some(z => z.skip) && (
+        <div className="dont-cut">🚫 Don't cut: <b>{quote.zones.filter(z => z.skip).map(z => z.name).join(', ')}</b></div>
+      )}
       {quote?.zones?.length > 0 && (
         <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ background: '#4ade8022', color: '#4ade80', border: '1px solid #4ade8044', borderRadius: '12px', padding: '2px 10px', fontSize: '12px', fontWeight: 700 }}>
@@ -77,7 +80,7 @@ export default function JobCard({ job, actions, expanded = false, onClick }) {
           </span>
           {quote.zones.map((z, i) => (
             <span key={i} style={{ fontSize: '12px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: z.color }} />{z.name}: {formatSqFt(z.sqFt)}
+              <span style={{ width: '8px', height: '8px', borderRadius: '2px', background: z.skip ? 'transparent' : z.color, border: `1px solid ${z.color}` }} />{z.skip ? '🚫 ' : ''}{z.name}: {formatSqFt(z.sqFt)}{z.skip ? " (don't cut)" : ''}
             </span>
           ))}
           <button type="button" className="btn-ghost" onClick={e => { e.stopPropagation(); setShowZones(s => !s); }} style={{ padding: '3px 10px', fontSize: '12px' }}>

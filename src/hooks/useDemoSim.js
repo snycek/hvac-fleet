@@ -1042,7 +1042,8 @@ export function useDemoSim(start = {}) {
     const lawn = {
       id, name: job.clientName, address: job.address, lat: job.location.lat, lng: job.location.lng,
       price: plan.price || job.earnings || 0, day: wd, truck: t,
-      quote: job.quote, notes: job.notes, requested: job.requested, notifyArrival: Boolean(plan.notifyArrival),
+      quote: job.quote && Array.isArray(plan.skipZones) ? { ...job.quote, zones: job.quote.zones.map((z, i) => ({ ...z, skip: plan.skipZones.includes(i) })) } : job.quote,
+      notes: job.notes, requested: job.requested, notifyArrival: Boolean(plan.notifyArrival),
     };
     const extraLawns = { ...(w.extraLawns || {}), [id]: lawn };
     const index = plan.slot && plan.slot.day === wd && plan.slot.techId === FOREMEN[t].id

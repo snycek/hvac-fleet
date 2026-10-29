@@ -34,6 +34,7 @@ import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { lawnCrews, wantsLandscaping } from '../lib/crews.js';
 import { directionsLinks, fmtDrive, nearestTruck, roadRoute } from '../lib/distance.js';
+import { costRates as computeCostRates } from '../lib/jobCost.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { billingMode, demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
@@ -384,6 +385,10 @@ export default function OwnerView({ demoOnly = false } = {}) {
     [payroll.employees, payroll.settings, jobs, shifts, delays, today]);
   const [payWeek, setPayWeek] = useState(null);
   const openPayroll = weekStart => { setPayWeek(weekStart); setPrinting(null); if (isPhone) setPhoneTab('crew'); else setView('payroll'); };
+  // What a cut costs (crew pay, gas, wear, card fees) from the last 60 days of books.
+  const costRates = useMemo(() => computeCostRates({ jobs, expenses, employees: payroll.employees, technicians, today }),
+    [jobs, expenses, payroll.employees, technicians, today]);
+  const fixedCosts = settings.fixedCosts || [];
   const todoCount = useMemo(() => countTodo({ jobs: allJobs, expenses, today, settings, statementsReady, payDue }), [allJobs, expenses, today, settings, statementsReady, payDue]);
 
   const kpiGroups = [
@@ -564,6 +569,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
     ...landQuoteFns,
     trucks: mapTechs, shop, onShowOnMap: showQuoteOnMap,
     payDue, onOpenPayroll: openPayroll,
+    costRates, fixedCosts,
   };
   const routeTechList = demoOn ? technicians.filter(t => t.status !== 'offline') : technicians;
   const mapEl = (
@@ -647,7 +653,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           )}
           {phoneTab === 'money' && (
             <>
-              <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} />
+              <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} />
               <section className="phone-card">
                 <div className="phone-card-head">💵 Billing</div>
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
@@ -729,7 +735,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
             {!collapsed.todo && <div className="dash-panel-body">
               {leftTab === 'quotes' ? (
                 quoteCount ? (
-                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} trucks={mapTechs} shop={shop} onShowOnMap={showQuoteOnMap} />
+                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} trucks={mapTechs} shop={shop} onShowOnMap={showQuoteOnMap} costRates={costRates} fixedCosts={fixedCosts} />
                 ) : <div className="cust-empty">✓ No new quote requests. New ones from the website land here.</div>
               ) : leftTab === 'todo' ? (
                 <OwnerTodo
@@ -815,7 +821,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
 
         {/* 4. Money + who cut what */}
         <div className="dash-col">
-          <ProfitLoss compact collapsed={!!collapsed.pl} onToggleCollapse={() => toggle('pl')} jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} />
+          <ProfitLoss compact collapsed={!!collapsed.pl} onToggleCollapse={() => toggle('pl')} jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} />
           <CrewReport compact collapsed={!!collapsed.crew} onToggleCollapse={() => toggle('crew')} jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
         </div>
       </div>

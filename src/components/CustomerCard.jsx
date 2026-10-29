@@ -156,7 +156,7 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
                     <div className="cust-prop-total"><b>{formatSqFt(p.totalSqFt)}</b> outlined{p.quotedPrice != null ? <> · website quoted <b>{formatPrice(p.quotedPrice)}</b></> : p.requested.includes('Snow Removal') ? ' · snow priced by you' : ''}</div>
                     <ul className="cust-prop-zones">
                       {p.zones.map(z => (
-                        <li key={z.id}><span style={{ background: z.color }} />{z.name}<b>{formatSqFt(z.sqFt)}</b></li>
+                        <li key={z.id} className={z.skip ? 'skip' : undefined}><span style={{ background: z.skip ? 'transparent' : z.color, border: `1px solid ${z.color}` }} />{z.skip ? '🚫 ' : ''}{z.name}{z.skip ? " · don't cut" : ''}<b>{formatSqFt(z.sqFt)}</b></li>
                       ))}
                     </ul>
                   </>

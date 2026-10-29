@@ -525,6 +525,10 @@ app.put('/api/jobs/:id/schedule', (req, res) => {
     // Snow customers get pushed every snowfall (dispatched when it snows), not on a repeat.
     perSnowfall: req.body.perSnowfall === true,
     notifyArrival: req.body.notifyArrival === true, // text/email when the crew heads over
+    // Areas the owner left off ("don't cut"): marked on the outline the crew sees.
+    ...(current.quote?.zones?.length && Array.isArray(req.body.skipZones) ? {
+      quote: { ...current.quote, zones: current.quote.zones.map((z, i) => ({ ...z, skip: req.body.skipZones.includes(i) })) },
+    } : {}),
     earnings: amount,
     acceptedAt: new Date().toISOString(),
   };

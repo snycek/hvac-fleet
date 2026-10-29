@@ -18,7 +18,8 @@ export function lawnStats(jobs, key) {
   const all = jobs.filter(j => lawnKey(j) === key && !['quote', 'declined'].includes(j.status));
   const cuts = all.filter(j => j.status === 'completed').sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)));
   // Under 3 min is a mis-tap; over 10 hrs means they forgot to tap Mark Cut.
-  const timed = cuts.filter(j => j.startedAt && j.completedAt)
+  // Landscaping projects at the same address take hours: they're not cut time.
+  const timed = cuts.filter(j => j.startedAt && j.completedAt && !/^landscaping/i.test(String(j.service || '')))
     .map(j => minutesBetween(j.startedAt, j.completedAt))
     .filter(m => m >= 3 && m < 600);
   const open = all.filter(j => !['completed', 'skipped'].includes(j.status))

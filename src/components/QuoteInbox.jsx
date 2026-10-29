@@ -8,6 +8,33 @@ import { REPEAT_OPTIONS, addDays, formatDay, todayString } from '../lib/dates.js
 import { bestPerDay, fmtMiles } from '../lib/routeFit.js';
 import { crewKind, isLandscapingJob, wantsLandscaping } from '../lib/crews.js';
 import LandscapeQuoteModal from './LandscapeQuoteModal.jsx';
+import { directionsLinks, driveEstimate, fmtDrive, metersBetween, nearestTruck } from '../lib/distance.js';
+
+// How far the address is: nearest truck out now (for landscaping, the nearest landscaping
+// crew too) and the shop. Plus Waze / Google Maps and "Show on map".
+function QuoteDistance({ job, trucks, shop, onShowOnMap }) {
+  const spot = job.location;
+  const near = nearestTruck(spot, trucks);
+  const land = isLandscapingJob(job) || wantsLandscaping(job) ? nearestTruck(spot, trucks, 'landscape') : null;
+  const fromShop = shop && spot?.lat ? driveEstimate(metersBetween(shop, spot)) : null;
+  const go = directionsLinks(spot, job.address);
+  const first = t => String(t.name || '').split(' ')[0];
+  return (
+    <div className="quote-dist">
+      <div className="quote-dist-lines">
+        {near && <span>🚚 <b>{fmtDrive(near)}</b> from {first(near.tech)}{near.tech.truckName ? ` (${near.tech.truckName})` : ''}</span>}
+        {land && land.tech.id !== near?.tech.id && <span>🌳 <b>{fmtDrive(land)}</b> from {first(land.tech)}'s landscaping crew</span>}
+        {fromShop && <span>🏠 <b>{fmtDrive(fromShop)}</b> from the yard</span>}
+        {!near && !fromShop && <span className="cust-dim">No trucks out right now.</span>}
+      </div>
+      <div className="quote-dist-go">
+        <a className="btn-ghost" href={go.waze} target="_blank" rel="noreferrer">🧭 Waze</a>
+        <a className="btn-ghost" href={go.google} target="_blank" rel="noreferrer">Google Maps</a>
+        {onShowOnMap && spot?.lat && <button type="button" className="btn-ghost quote-on-map" onClick={() => onShowOnMap(job)}>📍 Show on map</button>}
+      </div>
+    </div>
+  );
+}
 
 const street = a => String(a || '').split(',')[0];
 
@@ -204,7 +231,7 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
   );
 }
 
-function QuoteCard({ job, onAdd, onDecline, onPriceLand, now }) {
+function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onShowOnMap }) {
   const requested = requestedServices(job);
   // Landscaping: John prices it and it goes back to the customer to accept.
   const land = wantsLandscaping(job);
@@ -247,6 +274,8 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now }) {
         {job.notes && /Notes: /.test(job.notes) && <div>📝 {job.notes.split('Notes: ').slice(1).join('Notes: ')}</div>}
       </div>
 
+      <QuoteDistance job={job} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap} />
+
       {zones.length > 0 ? (
         <div className="quote-yard"><YardMap zones={zones} readOnly height="240px" /></div>
       ) : (
@@ -271,7 +300,8 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now }) {
 }
 
 /** New quotes waiting for a yes/no (part of the owner's To-Do). */
-export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote }) {
+// trucks: with live locations (for "how far"). shop: { lat, lng } or null. onShowOnMap(job).
+export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote, trucks = technicians, shop = null, onShowOnMap = null }) {
   const [adding, setAdding] = useState(null);
   const [pricing, setPricing] = useState(null); // landscaping request being priced
   const sent = jobs.filter(j => j.status === 'quote_sent').sort((a, b) => String(b.offer?.sentAt).localeCompare(String(a.offer?.sentAt)));
@@ -332,7 +362,7 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
       {quotes.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
           {quotes.map(job => (
-            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} />
+            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap} />
           ))}
         </div>
       )}

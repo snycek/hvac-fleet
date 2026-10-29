@@ -33,6 +33,7 @@ const tourSeen = () => { try { return localStorage.getItem(TOUR_KEY) === '1'; } 
 import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { lawnCrews, wantsLandscaping } from '../lib/crews.js';
+import { directionsLinks, fmtDrive, nearestTruck, roadRoute } from '../lib/distance.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { billingMode, demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
@@ -295,6 +296,22 @@ export default function OwnerView({ demoOnly = false } = {}) {
     return rankRoutes(routes, job.location, job.location);
   };
   const planRoutes = demoOn ? sim.planRoutes : livePlanRoutes;
+  // "Show on map" on a quote: its address plus the road from the nearest truck (or the shop).
+  const [mapFocus, setMapFocus] = useState(null);
+  const shop = COMPANY_INFO.shop || null;
+  const showQuoteOnMap = async job => {
+    if (!job.location?.lat) return;
+    // Landscaping requests: from the landscaping crew if it's out, else whoever is closest.
+    const near = (wantsLandscaping(job) && nearestTruck(job.location, mapTechs, 'landscape')) || nearestTruck(job.location, mapTechs);
+    const from = near ? near.tech.location : shop;
+    const who = near ? `from ${String(near.tech.name).split(' ')[0]}` : 'from the yard';
+    const name = String(job.clientName || '').split(' ')[0];
+    const base = { lat: job.location.lat, lng: job.location.lng, name: job.clientName, label: `${name} · ${String(job.address || '').split(',')[0]}`, waze: directionsLinks(job.location, job.address).waze };
+    if (isPhone) setPhoneTab('today'); else { setView('hub'); if (collapsed.map) toggle('map'); }
+    setMapFocus({ ...base, summary: near ? `about ${fmtDrive(near)} ${who}` : '' });
+    const road = from ? await roadRoute(from, job.location) : null;
+    if (road) setMapFocus(f => (f && f.lat === base.lat && f.lng === base.lng ? { ...base, path: road.path, summary: `${fmtDrive(road)} ${who}` } : f));
+  };
   // Landscaping quotes: priced by John, sent to the customer to accept.
   const landQuoteFns = {
     sendLandscapeQuote: demoOn ? sim.sendLandscapeQuote : live.sendLandscapeQuote,
@@ -531,6 +548,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
     onOpenQuotes: () => (isPhone ? setPhoneTab('todo') : setLeftTab('quotes')),
     promiseCheck: demoOn ? sim.promiseCheck : live.promiseCheck, settleCheck: demoOn ? sim.settleCheck : live.settleCheck,
     ...landQuoteFns,
+    trucks: mapTechs, shop, onShowOnMap: showQuoteOnMap,
   };
   const routeTechList = demoOn ? technicians.filter(t => t.status !== 'offline') : technicians;
   const mapEl = (
@@ -542,6 +560,9 @@ export default function OwnerView({ demoOnly = false } = {}) {
       selectedTechId={selectedTechId}
       {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
       onPickCustomer={key => setCustomerKey(key)}
+      focus={mapFocus}
+      onClearFocus={() => setMapFocus(null)}
+      yard={COMPANY_INFO.shop}
     />
   );
 
@@ -693,7 +714,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
             {!collapsed.todo && <div className="dash-panel-body">
               {leftTab === 'quotes' ? (
                 quoteCount ? (
-                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} />
+                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} trucks={mapTechs} shop={shop} onShowOnMap={showQuoteOnMap} />
                 ) : <div className="cust-empty">✓ No new quote requests. New ones from the website land here.</div>
               ) : leftTab === 'todo' ? (
                 <OwnerTodo
@@ -767,6 +788,9 @@ export default function OwnerView({ demoOnly = false } = {}) {
                   selectedTechId={selectedTechId}
                   {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
                   onPickCustomer={key => setCustomerKey(key)}
+                  focus={mapFocus}
+                  onClearFocus={() => setMapFocus(null)}
+                  yard={COMPANY_INFO.shop}
                 />
               </div>
             </div>

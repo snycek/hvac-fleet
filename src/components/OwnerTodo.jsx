@@ -73,7 +73,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck, sendLandscapeQuote, acceptLandscapeQuote }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck, sendLandscapeQuote, acceptLandscapeQuote, trucks, shop, onShowOnMap }) {
   // Checks customers said are on the way: John marks each received (paid) or bounced.
   const checks = pendingChecks(jobs);
   const [settling, setSettling] = useState(null);
@@ -438,7 +438,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
         {/* Quotes: the inbox itself, or (on the hub, where Quotes has its own tab) a pointer to it. */}
         {!hideQuotes ? (
           <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today}
-            sendLandscapeQuote={sendLandscapeQuote} acceptLandscapeQuote={acceptLandscapeQuote} />
+            sendLandscapeQuote={sendLandscapeQuote} acceptLandscapeQuote={acceptLandscapeQuote} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap} />
         ) : quotes.length > 0 && (
           <div>
             <h3 style={sectionTitle}>Quotes</h3>

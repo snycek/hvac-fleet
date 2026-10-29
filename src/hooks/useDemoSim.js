@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import demo from '../data/demoAllenParkWeek.json';
 import plowData from '../data/demoPlowLots.json';
+import yardLink from '../data/yardConnector.json';
 import { addDays, todayString } from '../lib/dates.js';
 import { lawnKey } from '../lib/lawns.js';
 import { estimatePrice } from '../lib/zones.js';
@@ -152,7 +153,21 @@ export function winterStart(from = todayString()) {
   return d;
 }
 const springStart = () => `${todayString().slice(0, 7)}-01`;
-const DEPOT = [demo.depot.lat, demo.depot.lng];
+// The yard (Roosevelt & Allen). The saved routes start and end at an older spot about
+// half a mile away, so the first leg gets the drive out of the yard and the last the drive back.
+const DEPOT = [COMPANY_INFO.shop.lat, COMPANY_INFO.shop.lng];
+const withYard = (leg, i) => {
+  let { path, meters = 0, seconds = 0 } = leg;
+  if (i === 0) {
+    path = [...yardLink.toOld.path.slice(0, -1), ...path];
+    meters += yardLink.toOld.meters; seconds += yardLink.toOld.seconds;
+  }
+  if (leg.to === 'depot') {
+    path = [...path, ...yardLink.fromOld.path.slice(1)];
+    meters += yardLink.fromOld.meters; seconds += yardLink.fromOld.seconds;
+  }
+  return { ...leg, path, meters, seconds };
+};
 
 function metersBetween([lat1, lng1], [lat2, lng2]) {
   const R = 6371000;
@@ -168,7 +183,7 @@ const ROUTES = WORKDAYS.map((_, day) => FOREMEN.map((_, truck) => {
   const r = demo.routes.find(x => x.day === day && x.truck === truck);
   return {
     ...r,
-    legs: r.legs.map(leg => {
+    legs: r.legs.map(withYard).map(leg => {
       const cum = [0];
       for (let i = 1; i < leg.path.length; i++) cum.push(cum[i - 1] + metersBetween(leg.path[i - 1], leg.path[i]));
       return { ...leg, cum, length: cum[cum.length - 1] };
@@ -178,7 +193,7 @@ const ROUTES = WORKDAYS.map((_, day) => FOREMEN.map((_, truck) => {
 
 const PLOW_ROUTES = plowData.routes.map(r => ({
   ...r,
-  legs: r.legs.map(leg => {
+  legs: r.legs.map(withYard).map(leg => {
     const cum = [0];
     for (let i = 1; i < leg.path.length; i++) cum.push(cum[i - 1] + metersBetween(leg.path[i - 1], leg.path[i]));
     return { ...leg, cum, length: cum[cum.length - 1] };
@@ -206,7 +221,7 @@ const routeFor = (custom, day, truck, date) => {
 };
 const routeOf = (w, t) => (isLand(w, t) ? w.landRoute || NO_ROUTE : isPlow(w, t) ? PLOW_ROUTES[t - w.truckCount] : routeFor(w.custom, w.day, t, addDays(w.weekStart, w.day)));
 const stopById = (id, w) => lawnById[id] || w?.extraLawns?.[id] || lotById[id] || w?.landStops?.[id];
-const DEPOT_PT = { lat: demo.depot.lat, lng: demo.depot.lng };
+const DEPOT_PT = { lat: DEPOT[0], lng: DEPOT[1] };
 
 // A straight-line leg (used until the real road path comes back).
 function straightLeg(a, b, to) {
@@ -1202,6 +1217,7 @@ export function useDemoSim(start = {}) {
     cutToday: todays.filter(j => j.status === 'completed').length,
     totalToday: todays.length,
     bounds: BOUNDS,
+    depot: DEPOT_PT,
     outline: OUTLINE,
   };
 }

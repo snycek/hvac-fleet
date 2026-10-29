@@ -694,6 +694,18 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .fit-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: 6px; }
 .fit-days button { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 4px; border-radius: 8px; border: 2px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; font-weight: 700; font-size: 13px; }
 .fit-days button small { font-weight: 500; font-size: 11px; color: var(--text-muted); }
+/* Quote distance + directions */
+.quote-dist { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; font-size: 13px; }
+.quote-dist-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.quote-dist-go { display: flex; gap: 6px; flex-wrap: wrap; }
+.quote-dist-go .btn-ghost { padding: 5px 10px; font-size: 12px; text-decoration: none; }
+.yard-pin { width: 26px; height: 26px; border-radius: 50%; background: #1f6b2b; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: 14px; box-shadow: 0 1px 4px #0008; }
+.quote-pin { font-size: 28px; line-height: 1; filter: drop-shadow(0 2px 2px #0008); }
+.quote-pin-tip { font-weight: 700; }
+.map-focus-card { position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; z-index: 500; width: max-content; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); background: var(--bg-secondary, #161b22); color: var(--text-primary); border: 1px solid #f0b42999; border-radius: 10px; padding: 7px 10px; font-size: 13px; box-shadow: 0 4px 14px #0007; }
+.map-focus-card span { min-width: 0; line-height: 1.35; }
+.map-focus-card a { color: #f0b429; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.map-focus-card button { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; }
 /* Landscaping quotes */
 .land-items { display: flex; flex-direction: column; gap: 6px; }
 .land-item { display: grid; grid-template-columns: 1fr 110px auto; gap: 6px; align-items: center; }

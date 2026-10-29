@@ -229,7 +229,7 @@ const LAWN_COLORS = { completed: '#3fb950', in_progress: '#e67e22', en_route: '#
  * fitBounds: optional [[lat, lng], [lat, lng]] to frame the map (e.g. demo area).
  * outline: optional { ring: [[lat, lng], ...], label } service-area boundary (dashed).
  */
-export default function FleetMap({ technicians = [], jobs = [], today = todayString(), selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false, onPickCustomer = null }) {
+export default function FleetMap({ technicians = [], jobs = [], today = todayString(), selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false, onPickCustomer = null, focus = null, onClearFocus = null, yard = null }) {
   const lotLayer   = useRef(null);
   // Click a lawn or lot → that customer's card (kept in a ref so markers don't rebuild).
   const pickRef = useRef(onPickCustomer);
@@ -292,6 +292,15 @@ export default function FleetMap({ technicians = [], jobs = [], today = todayStr
   // re-measure so the view doesn't drift, and re-frame the area if one was given.
   const boundsRef = useRef(boundsKey);
   useEffect(() => { boundsRef.current = boundsKey; }, [boundsKey]);
+  // A quote being looked at: frame it (and its drive line) instead of the whole area.
+  const focusKey = focus ? JSON.stringify({ lat: focus.lat, lng: focus.lng, label: focus.label, path: focus.path || null }) : '';
+  const focusRef = useRef(focusKey);
+  useEffect(() => { focusRef.current = focusKey; }, [focusKey]);
+  const frameFocus = key => {
+    const f = JSON.parse(key);
+    const pts = [[f.lat, f.lng], ...(f.path || [])];
+    mapObj.current.fitBounds(pts.length > 1 ? pts : [[f.lat - 0.004, f.lng - 0.004], [f.lat + 0.004, f.lng + 0.004]], { padding: [50, 50], maxZoom: 15, animate: false });
+  };
   useEffect(() => {
     const el = mapRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
@@ -301,7 +310,8 @@ export default function FleetMap({ technicians = [], jobs = [], today = todayStr
       if (size === last || !mapObj.current) return;
       last = size;
       mapObj.current.invalidateSize();
-      if (boundsRef.current) mapObj.current.fitBounds(JSON.parse(boundsRef.current), { padding: [30, 30] });
+      if (focusRef.current) frameFocus(focusRef.current);
+      else if (boundsRef.current) mapObj.current.fitBounds(JSON.parse(boundsRef.current), { padding: [30, 30] });
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -314,10 +324,39 @@ export default function FleetMap({ technicians = [], jobs = [], today = todayStr
     if (!map || !outlineKey) return undefined;
     const { ring, label } = JSON.parse(outlineKey);
     const shape = L.polygon(ring, { color: '#f0b429', weight: 2.5, dashArray: '8 6', fillColor: '#f0b429', fillOpacity: 0.05, interactive: false }).addTo(map);
-    if (label) shape.bindTooltip(label, { permanent: true, direction: 'center', className: 'zone-label' });
+    // (nudged up so it doesn't cover the yard, which sits near the middle of the ZIP)
+    if (label) shape.bindTooltip(label, { permanent: true, direction: 'center', className: 'zone-label', offset: [0, -70] });
     shape.bringToBack();
     return () => shape.remove();
   }, [outlineKey]);
+
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !focusKey) return undefined;
+    const f = JSON.parse(focusKey);
+    const layer = L.layerGroup().addTo(map);
+    if (f.path?.length) L.polyline(f.path, { color: '#f0b429', weight: 5, opacity: 0.9, dashArray: '10 8', interactive: false }).addTo(layer);
+    L.marker([f.lat, f.lng], { icon: L.divIcon({ html: '<div class="quote-pin">📍</div>', className: '', iconSize: [32, 32], iconAnchor: [16, 30] }), zIndexOffset: 1000 })
+      .bindTooltip(f.label, { permanent: true, direction: 'top', offset: [0, -28], className: 'quote-pin-tip' })
+      .addTo(layer);
+    frameFocus(focusKey);
+    return () => {
+      layer.remove();
+      if (boundsRef.current && mapObj.current) mapObj.current.fitBounds(JSON.parse(boundsRef.current), { padding: [30, 30], animate: false });
+    };
+  }, [focusKey]);
+
+  // The yard where the trucks park.
+  const yardKey = yard?.lat ? `${yard.lat},${yard.lng},${yard.label || ''}` : '';
+  useEffect(() => {
+    const map = mapObj.current;
+    if (!map || !yardKey) return undefined;
+    const [lat, lng, ...label] = yardKey.split(',');
+    const m = L.marker([Number(lat), Number(lng)], { icon: L.divIcon({ html: '<div class="yard-pin">🏠</div>', className: '', iconSize: [26, 26], iconAnchor: [13, 13] }), zIndexOffset: 0, interactive: true })
+      .bindTooltip(label.join(',') || 'Yard', { direction: 'top', offset: [0, -12] })
+      .addTo(map);
+    return () => m.remove();
+  }, [yardKey]);
 
   // Lawn dots for the demo route.
   useEffect(() => {
@@ -426,6 +465,13 @@ export default function FleetMap({ technicians = [], jobs = [], today = todayStr
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mapRef} style={{ width: '100%', height: '100%', borderRadius: '8px' }} />
       {snowing && <div className="snowfall" aria-hidden="true" />}
+      {focus && (
+        <div className="map-focus-card" role="status">
+          <span>📍 <b>{focus.name}</b>{focus.summary ? <> · {focus.summary}</> : null}</span>
+          {focus.waze && <a href={focus.waze} target="_blank" rel="noreferrer">🧭 Waze</a>}
+          {onClearFocus && <button type="button" onClick={onClearFocus} aria-label="Close">✕</button>}
+        </div>
+      )}
     </div>
   );
 }

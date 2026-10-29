@@ -82,6 +82,9 @@ export const COMPANY_INFO = {
   phoneHref: 'tel:3133789982',
   email: 'service@johnslawn.com',
   address: 'Serving Downriver Michigan & Surrounding Areas',
+  // The yard, where the trucks park: SW corner of Roosevelt & Allen. Used for "how far
+  // from the yard" on quotes, the map's 🏠 marker, and where the demo trucks start.
+  shop: { lat: 42.25646, lng: -83.21425, label: 'Yard · Roosevelt & Allen', address: '7199 Allen Rd, Allen Park, MI 48101' },
   hours: 'Mon–Sat, 7am–7pm · Plows run 24/7 when it snows',
   // Where customers mail checks (printed on invoices). Leave null until John confirms it.
   mailingAddress: null,

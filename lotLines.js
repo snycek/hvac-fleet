@@ -145,11 +145,13 @@ function clipConvex(subject, clip) {
   }
   return out;
 }
+// Front lot line to curb, plus room for the boulevard (60–66 ft roads here: ~5–7 m).
+const STREET_REACH = 10;
 const areaM2 = pts => Math.abs(pts.reduce((s, p, i) => { const q = pts[(i + 1) % pts.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
 
 /**
- * Trim zones ({ name, points: [[lat, lng]...] }) to the lot. The boulevard (the strip
- * between sidewalk and street) is city land in front of the lot, so it's left as is.
+ * Trim zones ({ name, points: [[lat, lng]...] }) to the lot. Front yard and boulevard may
+ * run past the front lot line to the curb (city strip the owner mows), but not wider than the lot.
  * Returns { zones, trimmed: how many zones lost grass outside the lot }.
  */
 export function clipToLot(zones, ring) {
@@ -159,14 +161,30 @@ export function clipToLot(zones, ring) {
   // Push the hull out 1.5 m from its middle.
   const cx = h.reduce((s, p) => s + p[0], 0) / h.length, cy = h.reduce((s, p) => s + p[1], 0) / h.length;
   const grown = h.map(([x, y]) => { const d = Math.hypot(x - cx, y - cy) || 1; return [x + ((x - cx) / d) * 1.5, y + ((y - cy) / d) * 1.5]; });
+  // The front lot line usually sits a few meters behind the sidewalk: the strip out to the
+  // curb (front lawn edge, sidewalk, boulevard) is city land the owner mows. So the street
+  // side gets the lot stretched STREET_REACH m toward the street (same width as the lot).
+  const centroid = pts => [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+  const streetSide = /boulevard|front/i;
+  const toward = zones.find(z => /boulevard/i.test(z.name)) || zones.find(z => /front/i.test(z.name));
+  let street = null;
+  if (toward) {
+    const [fx, fy] = centroid(toward.points.map(fwd));
+    const d = Math.hypot(fx - cx, fy - cy);
+    if (d > 2) {
+      const ux = (fx - cx) / d, uy = (fy - cy) / d;
+      street = hull([...grown, ...grown.map(([x, y]) => [x + ux * STREET_REACH, y + uy * STREET_REACH])]);
+    }
+  }
   let trimmed = 0;
   const out = [];
   for (const z of zones) {
-    if (/boulevard/i.test(z.name)) { out.push(z); continue; }
     const pts = z.points.map(fwd);
+    const onStreetSide = streetSide.test(z.name);
+    if (onStreetSide && !street) { out.push(z); continue; } // can't tell where the street is
     const before = areaM2(pts);
     const ccw = pts.reduce((s, p, i) => { const q = pts[(i + 1) % pts.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0) > 0 ? pts : [...pts].reverse();
-    const kept = clipConvex(ccw, grown);
+    const kept = clipConvex(ccw, onStreetSide ? street : grown);
     const after = kept.length >= 3 ? areaM2(kept) : 0;
     if (after < 4) { trimmed += 1; continue; } // nothing left on the lot (under ~40 sq ft)
     if (after < before * 0.97) trimmed += 1;

@@ -47,11 +47,12 @@ const WIDE = { zoom: KEYED_ZOOM - 1, size: 1024 };
 // stitch the map's own tiles (zoom 19, the sharpest these have) to cover the same box,
 // and scale to the same pixel size so the rest of the code doesn't change.
 const TILE_ZOOM = 19;
+const FIT_SIZE = 1024;
 const tileXY = (lat, lng) => {
   const n = 256 * 2 ** TILE_ZOOM, r = (lat * Math.PI) / 180;
   return [((lng + 180) / 360) * n, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n];
 };
-async function tilePhoto(box, size) {
+async function tilePhoto(box, size, ring = null) {
   const key = process.env.ARCGIS_API_KEY;
   const [x0, y0] = tileXY(box.north, box.west);
   const [x1, y1] = tileXY(box.south, box.east);
@@ -71,17 +72,30 @@ async function tilePhoto(box, size) {
   const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
   const mosaic = await sharp({ create: { width: (tx1 - tx0 + 1) * 256, height: (ty1 - ty0 + 1) * 256, channels: 3, background: '#000' } })
     .composite(tiles).png().toBuffer();
-  const dot = Buffer.from(`<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${Math.max(4, size / 160)}" fill="#ff0000" stroke="#fff" stroke-width="1.5"/></svg>`);
+  // The county lot line, drawn so the AI sees it on the picture (dashed yellow, like the map).
+  const toPx = ([la, ln]) => `${(((ln - box.west) / (box.east - box.west)) * size).toFixed(1)},${(((box.north - la) / (box.north - box.south)) * size).toFixed(1)}`;
+  const lotLine = ring ? `<polygon points="${ring.map(toPx).join(' ')}" fill="none" stroke="#ffd400" stroke-width="${Math.max(2, size / 400)}" stroke-dasharray="${size / 80},${size / 120}"/>` : '';
+  const dot = Buffer.from(`<svg width="${size}" height="${size}">${lotLine}<circle cx="${size / 2}" cy="${size / 2}" r="${Math.max(4, size / 160)}" fill="#ff0000" stroke="#fff" stroke-width="1.5"/></svg>`);
   const out = await sharp(mosaic).extract({ left, top, width: w, height: h })
     .resize(size, size, { kernel: 'lanczos3' }).composite([{ input: dot }]).jpeg({ quality: 88 }).toBuffer();
   return out.toString('base64');
 }
 
-async function keyedPhoto(point, wide = false) {
+// fit: a square this many meters across, drawn with the lot line `ring` (house lots, so the
+// lot fills the photo instead of being a small patch in the middle).
+async function keyedPhoto(point, wide = false, fit = null, ring = null) {
   const key = process.env.ARCGIS_API_KEY;
   if (!key) return null;
   const size = wide ? WIDE.size : keyedSize(point.tapped);
   const zoom = wide ? WIDE.zoom : KEYED_ZOOM;
+  if (fit) {
+    const box = bboxAround(point, fit);
+    try {
+      return { photo: await tilePhoto(box, FIT_SIZE, ring), box, size: FIT_SIZE, span: Math.round(fit), dot: true, lotDrawn: Boolean(ring) };
+    } catch (err) {
+      console.warn('[OUTLINE] fitted map tiles failed:', err.message);
+    }
+  }
   {
     const box = mercatorBox(point, zoom, size);
     try {
@@ -165,9 +179,9 @@ function promptFor({ size, span, dot }, tapped, large = false, lot = null) {
     ? `\n\nThis is a large property (like a church, school, business or park), so this photo is zoomed out to show all of it. Outline every mowable lawn area on this one property, however far it reaches (up to 10 polygons); name them Front Yard, Back Yard, Side Yard, Side Yard 2, Boulevard or Lawn by where they sit. Parking lots and paved areas are not lawn.`
     : '';
   const where = lot
-    ? `The customer's lot lines, from county parcel records, are this polygon in pixel coordinates (x, y): ${JSON.stringify(lot.px)}. That lot (about ${lot.sqFt.toLocaleString('en-US')} sq ft) is their property${dot ? '; the red dot is just the middle of it' : ''}.
+    ? `The customer's lot lines, from county parcel records, are ${lot.drawn ? 'drawn on the photo as a dashed yellow line (the same polygon in pixel coordinates (x, y): ' + JSON.stringify(lot.px) + ')' : 'this polygon in pixel coordinates (x, y): ' + JSON.stringify(lot.px)}. That lot (about ${lot.sqFt.toLocaleString('en-US')} sq ft) is their property${dot ? '; the red dot is just the middle of it' : ''}.
 
-Use those lot lines to know which property is theirs, but they are approximate: county lines are often shifted 2–3 meters (several pixels to a few dozen) from the photo. So for the actual edges on the sides and at the back, follow what you see: the driveway, fence, hedge, mowing-pattern change, or the house wall. Their lawn right beside their own house belongs to them even where the county line cuts across it; don't stop a lawn short just because the line runs through it, and don't take grass that is clearly the neighbor's just because the line reaches over it. On the street side, the front yard runs out to the public sidewalk, and the boulevard is the grass strip between that sidewalk and the street curb. The county's front line can fall anywhere from before the sidewalk to the curb, so place both by what you see, not by the line. Outline the boulevard across the width of their lot as its own polygon named "Boulevard"; most streets here have one, so look closely for it (only leave it out if the sidewalk runs right against the curb or there is no sidewalk). The sidewalk and the street pavement are never lawn.`
+Use those lot lines to know which property is theirs, but they are approximate: county lines are often shifted 2–3 meters (several pixels to a few dozen) from the photo. So for the actual edges on the sides and at the back, follow what you see: the driveway, fence, hedge, mowing-pattern change, or the house wall. Their lawn right beside their own house belongs to them even where the county line cuts across it; don't stop a lawn short just because the line runs through it, and don't take grass that is clearly the neighbor's just because the line reaches over it. Before you finish, sweep the whole lot: every patch of grass inside their lot (beside the house, between the driveway and the side line, beside and behind a garage or shed, along the back fence) should be inside one of your polygons. On the street side, the front yard runs out to the public sidewalk, and the boulevard is the grass strip between that sidewalk and the street curb. The county's front line can fall anywhere from before the sidewalk to the curb, so place both by what you see, not by the line. Outline the boulevard across the width of their lot as its own polygon named "Boulevard"; most streets here have one, so look closely for it (only leave it out if the sidewalk runs right against the curb or there is no sidewalk). The sidewalk and the street pavement are never lawn.`
     : tapped
     ? `A lawn-care customer tapped the roof of their house, and that spot is the exact center of the photo (pixel ${mid},${mid}). The house under that spot is their property.`
     : `The center of the photo (pixel ${mid},${mid}) is where a lawn-care customer's typed street address landed on the map. Address points are often on the street, sidewalk or driveway in front of the house rather than on the roof: their property is the house that point belongs to (usually the closest house, facing the street the point is on).`;
@@ -272,7 +286,10 @@ async function outlineLot(point, lot) {
   const across = Math.max(width, height) + 16;
   const wide = across > 100;
   const center = { lat: mid.lat, lng: mid.lng, tapped: false };
-  const result = await trace(center, wide, lot);
+  // House lot: photo fitted to the lot plus ~14 m around it (street, sidewalk, boulevard,
+  // neighbors' edges for context), at least 50 m so a small lot still has its street in view.
+  const fit = wide ? null : Math.min(110, Math.max(50, across + 28));
+  const result = await trace(center, wide, lot, fit);
   const { zones } = clipToLot(result.zones, lot.ring);
   const warnings = [...result.warnings];
   if (across > (wide ? 220 : 110)) warnings.unshift('Lot is bigger than the satellite photo; some of it may not be outlined.');
@@ -285,14 +302,15 @@ async function outlineLot(point, lot) {
 
 const addUsage = (a = {}, b = {}) => ({ input_tokens: (a.input_tokens || 0) + (b.input_tokens || 0), output_tokens: (a.output_tokens || 0) + (b.output_tokens || 0) });
 
-async function trace(point, large, lot = null) {
-  const shot = (await keyedPhoto(point, large)) || (await freePhoto(point, large));
+async function trace(point, large, lot = null, fit = null) {
+  const shot = (await keyedPhoto(point, large, fit, lot?.ring)) || (await freePhoto(point, large));
   // Lot lines in this photo's pixels (at most ~60 corners).
   let lotPx = null;
   if (lot) {
     const { box, size } = shot;
     const step = Math.ceil(lot.ring.length / 60);
     lotPx = {
+      drawn: Boolean(shot.lotDrawn),
       sqFt: lot.sqFt,
       px: lot.ring.filter((_, i) => i % step === 0).map(([la, ln]) => [
         Math.round(((ln - box.west) / (box.east - box.west)) * size),

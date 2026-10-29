@@ -23,8 +23,9 @@ export function todoCount({ jobs, expenses, today, settings, statementsReady, hi
   return (hideQuotes ? (quotes ? 1 : 0) : quotes)
     + expenses.filter(e => e.status === 'pending').length
     + (statementsReady ? 1 : 0)
-    // Past-due accounts whose whole balance has a check on the way are counted once, under checks.
-    + pastDueCustomers(jobs, today, 1, settings).filter(c => !c.checkCoversAll).length
+    // Past due counts only when John can act: not reminded this week, nothing on the way
+    // (those wait in a folded group and come back when the week is up).
+    + pastDueCustomers(jobs, today, 1, settings).filter(c => !c.recentlyReminded && !c.check).length
     + pendingChecks(jobs).length
     + jobs.filter(j => j.status === 'completed' && !j.paid && j.paymentIssue).length
     + chores.noContact.length + chores.staleQuotes.length;

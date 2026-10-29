@@ -783,3 +783,8 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .demo-link-note { font-size: 13px; color: #f0b429; font-weight: 600; }
 .demo-link-login { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--text-primary); border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; text-decoration: none; }
 .demo-link-login:hover { background: var(--bg-elevated); }
+
+/* Past due: reminded accounts wait in a folded group */
+.waiting-group { margin-top: 10px; }
+.waiting-toggle { background: none; border: 1px dashed var(--border); border-radius: 8px; width: 100%; text-align: left; padding: 8px 12px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; }
+.waiting-toggle:hover { color: var(--text-primary); background: var(--bg-elevated); }

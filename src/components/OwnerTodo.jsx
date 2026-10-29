@@ -131,6 +131,12 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     return { ...c, latest: c.jobs[c.jobs.length - 1], lastReminder: contacts[0] || null, reminders: contacts.length };
   });
   const shownUnpaid = accounts.flatMap(a => a.jobs);
+  // Reminded this week, or a check/cash on the way: nothing for John to do yet, so they
+  // wait in a folded group and come back up when the week is up.
+  const isWaiting = a => a.recentlyReminded || !!a.check;
+  const needsAction = accounts.filter(a => !isWaiting(a));
+  const waitingAccts = accounts.filter(isWaiting);
+  const [showWaiting, setShowWaiting] = useState(false);
   const pastDueAll = pastDueCustomers(jobs, today, 1, settings);
   const pastDueTotal = pastDueAll.reduce((s, c) => s + c.overdue, 0);
   // Testing helper: mark every bill in the (filtered) list paid by cash, one tap.
@@ -173,6 +179,103 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   const unpaidTotal = unpaid.reduce((s, j) => s + (j.earnings || 0), 0);
   const total = todoCount({ jobs, expenses, today, settings, statementsReady, hideQuotes });
 
+
+  // One past-due account row (used by both "needs action" and "reminded, waiting").
+  const renderAcct = (acct, i) => {
+    const late = acct.oldestDays >= 30;
+    const open = openAcct === acct.key;
+    const n = acct.jobs.length;
+    // Plow customers get pushes, not cuts.
+    const snow = acct.latest.service === 'Snow Removal';
+    const unit = snow ? (n === 1 ? 'push' : 'pushes') : (n === 1 ? 'cut' : 'cuts');
+    const icon = snow ? '❄️' : '✂️';
+    return (
+    <div key={acct.key} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
+      <span style={{ flex: '1 1 170px', minWidth: 0 }}>
+        {late && <span className="yield" role="img" aria-label={`${acct.oldestDays} days past due`} title={`${acct.oldestDays} days past the due date`}>⚠️</span>}
+        <Addr job={acct.latest} />
+        <span style={{ color: 'var(--text-muted)' }}> · {acct.name}</span>
+        {acct.lastReminder && (
+          <span className="reminded" title={acct.lastReminder.message}> · 🔔 {shortDate(acct.lastReminder.at)}{acct.reminders > 1 ? ` ×${acct.reminders}` : ''}</span>
+        )}
+        {acct.check && (
+          <div className="check-badge">📨 {acct.check.kind === 'cash' ? 'Cash with the crew' : acct.check.collectedBy ? 'Check with the crew' : 'Check coming'} · {checkWhen(acct.check)}{acct.checkCoversAll ? '' : ` · covers ${money(acct.check.amount)}`}</div>
+        )}
+      </span>
+      <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
+        style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? `Show each ${snow ? 'push' : 'cut'}` : `${snow ? 'Plowed' : 'Cut'} ${shortDate(acct.jobs[0].completedAt)}`}>
+        {n > 1 ? (open ? '▾' : '▸') : icon} {n > 1 ? `${n} ${unit} · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d late
+      </button>
+      <span style={{ fontWeight: 700, width: '62px', textAlign: 'right' }}>{money(acct.balance)}</span>
+      <span className="row-actions">
+      {printInvoice && (
+        <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(acct.latest)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${acct.name}`}>🖨</button>
+      )}
+      {(remindAccounts || remindCustomer) && !acct.check && (
+        (() => {
+          const wait = nextReminderDate(acct.lastReminder, today);
+          return (
+            <button type="button" className="btn-ghost remind-btn" disabled={!!wait || reminding === acct.key} onClick={() => remindOne(acct)}
+              title={wait ? `Reminded ${shortDate(acct.lastReminder.at)} — one reminder per week. Next on ${shortDate(wait)}.` : `Send ${String(acct.name).split(' ')[0]} one reminder for the whole balance`}>
+              {reminding === acct.key ? '…' : wait ? `🔔 ${shortDate(wait)}` : '🔔 Remind'}
+            </button>
+          );
+        })()
+      )}
+      {acct.check && settleCheck ? (
+        // Their check is on the way: one tap when it shows up (paid by check).
+        <button type="button" className="btn-ghost" disabled={settling === acct.check.id} onClick={() => settle({ ...acct.check, clientName: acct.name }, true)}
+          style={{ padding: '3px 10px', fontSize: '12px', color: '#a371f7', borderColor: '#a371f755' }}
+          title={`Got their check: mark ${money(acct.check.amount)} paid by check`}>
+          {settling === acct.check.id ? '…' : `✓ Acknowledge ${acct.check.kind === 'cash' ? 'cash' : 'check'}`}
+        </button>
+      ) : (
+      <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}
+        aria-expanded={choosing === acct.key} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}
+        title={n > 1 ? `Mark all ${n} ${unit} paid (${money(acct.balance)})` : 'Mark paid'}>
+        {paying === acct.key ? '…' : n > 1 ? 'Mark all paid' : 'Mark paid'}
+      </button>
+      )}
+      </span>
+      {choosing === acct.key && (
+        <div className="pay-choose">
+          <span>{n > 1 ? `All ${n} ${unit} · ${money(acct.balance)} paid by` : 'Paid by'}</span>
+          <button type="button" onClick={() => recordAll(acct, 'cash')}>{METHODS.cash.icon} Cash</button>
+          <button type="button" onClick={() => recordAll(acct, 'check')}>{METHODS.check.icon} Check</button>
+          {promiseCheck && (
+            <button type="button" title="They called to say a check is coming: hold reminders and list it under Checks to clear"
+              onClick={async () => { setChoosing(null); try { await promiseCheck(acct.jobs.map(j => j.id), 'mail', ''); } catch (e) { setCheckNote(e.message); } }}>📨 Check coming</button>
+          )}
+          <span className="pay-choose-card">
+            <select value={testCard} onChange={e => setTestCard(e.target.value)} aria-label="Test card" title="Test card processor — pick a card that approves or declines">
+              {TEST_CARD_ORDER.map(l4 => [l4, TEST_CARDS[l4]]).map(([l4, c]) => <option key={l4} value={l4}>{c.brand} ••{l4}{c.ok ? '' : ` (${c.reason.toLowerCase()})`}</option>)}
+            </select>
+            <button type="button" onClick={() => recordAll(acct, 'card', testCard)}>{METHODS.card.icon} Charge card</button>
+          </span>
+        </div>
+      )}
+      {open && n > 1 && (
+        <div className="acct-cut-list">
+          {acct.jobs.map(job => {
+            const d = lateBy(job);
+            return (
+              <div key={job.id} className="acct-cut">
+                <span className={d > 0 ? 'cust-warn' : 'cust-dim'}>{icon} {shortDate(job.completedAt)} · {d > 0 ? `${d}d late` : `due ${shortDate(dueDateFor(job, settings))}`}</span>
+                <span style={{ fontWeight: 600 }}>{money(job.earnings || 0)}</span>
+                <span className="acct-cut-pay">
+                  <span className="cust-dim">Paid:</span>
+                  <button type="button" disabled={paying === job.id} onClick={() => record(job, 'cash')}>{METHODS.cash.icon} Cash</button>
+                  <button type="button" disabled={paying === job.id} onClick={() => record(job, 'check')}>{METHODS.check.icon} Check</button>
+                  <button type="button" disabled={paying === job.id} onClick={() => record(job, 'card', testCard)}>{METHODS.card.icon} Card</button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+    );
+  };
 
   return (
     <section style={{ marginBottom: bare ? 0 : '28px' }}>
@@ -264,7 +367,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
         {pastDueAll.length > 0 && (
           <div>
             <h3 style={{ ...sectionTitle, color: '#f0b429' }}>
-              ⚠️ Past due · {pastDueAll.length} account{pastDueAll.length === 1 ? '' : 's'} · {money(pastDueTotal)}
+              ⚠️ Past due · {needsAction.length} need{needsAction.length === 1 ? 's' : ''} action{waitingAccts.length ? ` · ${waitingAccts.length} waiting` : ''} · {money(pastDueTotal)}
             </h3>
             <div className="cust-dim" style={{ fontSize: '11.5px', marginTop: '-6px', marginBottom: '8px' }}>Late = past the due date on their statement or invoice. Everything else is in Billing.</div>
             <div className="late-filter" role="group" aria-label="Days past due">
@@ -295,9 +398,6 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   title={toRemind.length ? 'One reminder per customer, with their pay link, sent the way they prefer' : `Everyone in this list was reminded in the last ${REMIND_GAP_DAYS} days`}>
                   🔔 Remind all{lateMin ? ` ${lateMin}+ days late` : ''} ({toRemind.length})
                 </button>
-                {behind.some(c => c.recentlyReminded) && (
-                  <span className="cust-dim">{behind.filter(c => c.recentlyReminded).length} already reminded this week — one reminder per week</span>
-                )}
                 {bulk.done && <span className="remind-done">{bulk.done}</span>}
                 {bulk.open && toRemind.length > 0 && (
                   <div className="remind-confirm">
@@ -313,106 +413,22 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
               </div>
             )}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              {(showAllUnpaid ? accounts : accounts.slice(0, UNPAID_PREVIEW)).map((acct, i) => {
-                const late = acct.oldestDays >= 30;
-                const open = openAcct === acct.key;
-                const n = acct.jobs.length;
-                // Plow customers get pushes, not cuts.
-                const snow = acct.latest.service === 'Snow Removal';
-                const unit = snow ? (n === 1 ? 'push' : 'pushes') : (n === 1 ? 'cut' : 'cuts');
-                const icon = snow ? '❄️' : '✂️';
-                return (
-                <div key={acct.key} className={late ? 'unpaid-row past-due' : 'unpaid-row'} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px', flexWrap: 'wrap' }}>
-                  <span style={{ flex: '1 1 170px', minWidth: 0 }}>
-                    {late && <span className="yield" role="img" aria-label={`${acct.oldestDays} days past due`} title={`${acct.oldestDays} days past the due date`}>⚠️</span>}
-                    <Addr job={acct.latest} />
-                    <span style={{ color: 'var(--text-muted)' }}> · {acct.name}</span>
-                    {acct.lastReminder && (
-                      <span className="reminded" title={acct.lastReminder.message}> · 🔔 {shortDate(acct.lastReminder.at)}{acct.reminders > 1 ? ` ×${acct.reminders}` : ''}</span>
-                    )}
-                    {acct.check && (
-                      <div className="check-badge">📨 {acct.check.kind === 'cash' ? 'Cash with the crew' : acct.check.collectedBy ? 'Check with the crew' : 'Check coming'} · {checkWhen(acct.check)}{acct.checkCoversAll ? '' : ` · covers ${money(acct.check.amount)}`}</div>
-                    )}
-                  </span>
-                  <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
-                    style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? `Show each ${snow ? 'push' : 'cut'}` : `${snow ? 'Plowed' : 'Cut'} ${shortDate(acct.jobs[0].completedAt)}`}>
-                    {n > 1 ? (open ? '▾' : '▸') : icon} {n > 1 ? `${n} ${unit} · ` : `${shortDate(acct.jobs[0].completedAt)} · `}{acct.oldestDays}d late
-                  </button>
-                  <span style={{ fontWeight: 700, width: '62px', textAlign: 'right' }}>{money(acct.balance)}</span>
-                  <span className="row-actions">
-                  {printInvoice && (
-                    <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(acct.latest)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${acct.name}`}>🖨</button>
-                  )}
-                  {(remindAccounts || remindCustomer) && !acct.check && (
-                    (() => {
-                      const wait = nextReminderDate(acct.lastReminder, today);
-                      return (
-                        <button type="button" className="btn-ghost remind-btn" disabled={!!wait || reminding === acct.key} onClick={() => remindOne(acct)}
-                          title={wait ? `Reminded ${shortDate(acct.lastReminder.at)} — one reminder per week. Next on ${shortDate(wait)}.` : `Send ${String(acct.name).split(' ')[0]} one reminder for the whole balance`}>
-                          {reminding === acct.key ? '…' : wait ? `🔔 ${shortDate(wait)}` : '🔔 Remind'}
-                        </button>
-                      );
-                    })()
-                  )}
-                  {acct.check && settleCheck ? (
-                    // Their check is on the way: one tap when it shows up (paid by check).
-                    <button type="button" className="btn-ghost" disabled={settling === acct.check.id} onClick={() => settle({ ...acct.check, clientName: acct.name }, true)}
-                      style={{ padding: '3px 10px', fontSize: '12px', color: '#a371f7', borderColor: '#a371f755' }}
-                      title={`Got their check: mark ${money(acct.check.amount)} paid by check`}>
-                      {settling === acct.check.id ? '…' : `✓ Acknowledge ${acct.check.kind === 'cash' ? 'cash' : 'check'}`}
-                    </button>
-                  ) : (
-                  <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}
-                    aria-expanded={choosing === acct.key} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}
-                    title={n > 1 ? `Mark all ${n} ${unit} paid (${money(acct.balance)})` : 'Mark paid'}>
-                    {paying === acct.key ? '…' : n > 1 ? 'Mark all paid' : 'Mark paid'}
-                  </button>
-                  )}
-                  </span>
-                  {choosing === acct.key && (
-                    <div className="pay-choose">
-                      <span>{n > 1 ? `All ${n} ${unit} · ${money(acct.balance)} paid by` : 'Paid by'}</span>
-                      <button type="button" onClick={() => recordAll(acct, 'cash')}>{METHODS.cash.icon} Cash</button>
-                      <button type="button" onClick={() => recordAll(acct, 'check')}>{METHODS.check.icon} Check</button>
-                      {promiseCheck && (
-                        <button type="button" title="They called to say a check is coming: hold reminders and list it under Checks to clear"
-                          onClick={async () => { setChoosing(null); try { await promiseCheck(acct.jobs.map(j => j.id), 'mail', ''); } catch (e) { setCheckNote(e.message); } }}>📨 Check coming</button>
-                      )}
-                      <span className="pay-choose-card">
-                        <select value={testCard} onChange={e => setTestCard(e.target.value)} aria-label="Test card" title="Test card processor — pick a card that approves or declines">
-                          {TEST_CARD_ORDER.map(l4 => [l4, TEST_CARDS[l4]]).map(([l4, c]) => <option key={l4} value={l4}>{c.brand} ••{l4}{c.ok ? '' : ` (${c.reason.toLowerCase()})`}</option>)}
-                        </select>
-                        <button type="button" onClick={() => recordAll(acct, 'card', testCard)}>{METHODS.card.icon} Charge card</button>
-                      </span>
-                    </div>
-                  )}
-                  {open && n > 1 && (
-                    <div className="acct-cut-list">
-                      {acct.jobs.map(job => {
-                        const d = lateBy(job);
-                        return (
-                          <div key={job.id} className="acct-cut">
-                            <span className={d > 0 ? 'cust-warn' : 'cust-dim'}>{icon} {shortDate(job.completedAt)} · {d > 0 ? `${d}d late` : `due ${shortDate(dueDateFor(job, settings))}`}</span>
-                            <span style={{ fontWeight: 600 }}>{money(job.earnings || 0)}</span>
-                            <span className="acct-cut-pay">
-                              <span className="cust-dim">Paid:</span>
-                              <button type="button" disabled={paying === job.id} onClick={() => record(job, 'cash')}>{METHODS.cash.icon} Cash</button>
-                              <button type="button" disabled={paying === job.id} onClick={() => record(job, 'check')}>{METHODS.check.icon} Check</button>
-                              <button type="button" disabled={paying === job.id} onClick={() => record(job, 'card', testCard)}>{METHODS.card.icon} Card</button>
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                );
-              })}
+              {(showAllUnpaid ? needsAction : needsAction.slice(0, UNPAID_PREVIEW)).map(renderAcct)}
+              {needsAction.length === 0 && <div className="cust-empty" style={{ padding: '12px' }}>✓ Everyone here has been reminded this week (or has a payment on the way).</div>}
             </div>
-            {accounts.length > UNPAID_PREVIEW && (
+            {needsAction.length > UNPAID_PREVIEW && (
               <button type="button" className="btn-ghost" onClick={() => setShowAllUnpaid(s => !s)} style={{ marginTop: '8px', padding: '6px 12px', fontSize: '12px' }}>
-                {showAllUnpaid ? 'Show less' : `Show ${accounts.length - UNPAID_PREVIEW} more`}
+                {showAllUnpaid ? 'Show less' : `Show ${needsAction.length - UNPAID_PREVIEW} more`}
               </button>
+            )}
+            {waitingAccts.length > 0 && (
+              <div className="waiting-group">
+                <button type="button" className="waiting-toggle" aria-expanded={showWaiting} onClick={() => setShowWaiting(s => !s)}
+                  title="Reminded in the last 7 days, or a check/cash is on the way. They move back up if still unpaid when the week is up.">
+                  {showWaiting ? '▾' : '▸'} 🔔 {waitingAccts.length} reminded, waiting to pay · {money(waitingAccts.reduce((s, a) => s + a.overdue, 0))} past due
+                </button>
+                {showWaiting && <div className="card" style={{ padding: 0, overflow: 'hidden', marginTop: '6px' }}>{waitingAccts.map(renderAcct)}</div>}
+              </div>
             )}
           </div>
         )}

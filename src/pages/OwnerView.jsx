@@ -23,6 +23,7 @@ import CollapseButton from '../components/CollapseButton.jsx';
 import PayrollView from '../components/PayrollView.jsx';
 import PrintInvoices from '../components/PrintInvoices.jsx';
 import CustomerCard from '../components/CustomerCard.jsx';
+import CustomerSearch from '../components/CustomerSearch.jsx';
 import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { COMPANY_INFO } from '../data/services.js';
@@ -113,6 +114,12 @@ export default function OwnerView({ demoOnly = false } = {}) {
     return next;
   });
   const fold = id => (collapsed[id] ? ' collapsed' : '');
+  // Left panel tabs: folded → open to that section; tap the open section again → fold it.
+  const pickLeftTab = id => {
+    if (collapsed.todo) { setLeftTab(id); toggle('todo'); return; }
+    if (id === leftTab) { toggle('todo'); return; }
+    setLeftTab(id);
+  };
   // A column whose panels are all folded becomes a thin rail; the rest share its space.
   const gridVars = Object.fromEntries(COLUMNS.map((c, i) => [`--col${i + 1}`, c.panels.every(p => collapsed[p]) ? '190px' : c.track]));
 
@@ -430,13 +437,15 @@ export default function OwnerView({ demoOnly = false } = {}) {
         <div className="dash-col">
           <section className={`dash-panel${fold('todo')}`} style={{ position: 'relative' }}>
             {quoteFlash > 0 && <span key={quoteFlash} className="panel-flash" aria-hidden="true" />}
+            {/* Quick search: always visible, even with the panel folded. */}
+            <CustomerSearch jobs={allJobs} onPick={key => setCustomerKey(key)} />
             <div className="dash-panel-head">
               <CollapseButton collapsed={collapsed.todo} onToggle={() => toggle('todo')} label="To-Do" />
               <div className="dash-tabs" role="tablist">
-                <button type="button" role="tab" aria-selected={leftTab === 'todo'} onClick={() => setLeftTab('todo')}>📥 To-Do{todoCount ? <span className="tab-count">{todoCount}</span> : null}</button>
-                <button type="button" role="tab" aria-selected={leftTab === 'quotes'} onClick={() => setLeftTab('quotes')}>📝 Quotes{quoteCount ? <span className="tab-count new">{quoteCount}</span> : null}</button>
-                <button type="button" role="tab" aria-selected={leftTab === 'billing'} onClick={() => setLeftTab('billing')}>💵 Billing{statementsReady ? <span className="tab-count">{statementsReady.count}</span> : null}</button>
-                <button type="button" role="tab" aria-selected={leftTab === 'lawns'} onClick={() => setLeftTab('lawns')}>🌱 Lawns<span className="tab-count muted">{stats.lawns}</span></button>
+                <button type="button" role="tab" aria-selected={leftTab === 'todo' && !collapsed.todo} onClick={() => pickLeftTab('todo')}>📥 To-Do{todoCount ? <span className="tab-count">{todoCount}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'quotes' && !collapsed.todo} onClick={() => pickLeftTab('quotes')}>📝 Quotes{quoteCount ? <span className="tab-count new">{quoteCount}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'billing' && !collapsed.todo} onClick={() => pickLeftTab('billing')}>💵 Billing{statementsReady ? <span className="tab-count">{statementsReady.count}</span> : null}</button>
+                <button type="button" role="tab" aria-selected={leftTab === 'lawns' && !collapsed.todo} onClick={() => pickLeftTab('lawns')}>🌱 Lawns<span className="tab-count muted">{stats.lawns}</span></button>
               </div>
             </div>
             {!collapsed.todo && <div className="dash-panel-body">

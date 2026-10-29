@@ -3,9 +3,10 @@
 // back into map coordinates and the customer adjusts the shapes like hand-drawn ones.
 //
 // Needs ANTHROPIC_API_KEY on the server (without it the button stays hidden).
-// Photo: with ARCGIS_API_KEY, Esri's Static Maps (licensed for business use, newer, sharper);
-// otherwise Esri's free export.
+// Photo: with ARCGIS_API_KEY, the same World Imagery tiles the quote map shows (so the outline
+// lines up with the picture the customer sees), then Esri's Static Maps, then the free export.
 import Anthropic from '@anthropic-ai/sdk';
+import sharp from 'sharp';
 import { findLot, lotBox, clipToLot } from './lotLines.js';
 
 const MODEL = 'claude-opus-5-5';
@@ -40,11 +41,55 @@ const spanMeters = (box, lat) => Math.round(((box.east - box.west) * Math.PI / 1
 
 // Big properties (church, school, business): one zoom out at full size, ~230 m across.
 const WIDE = { zoom: KEYED_ZOOM - 1, size: 1024 };
+// ---- Map tiles (what the quote map shows) ----
+// Static Maps is a different, sharper picture that sits ~2-3 m off the map tiles here
+// (14640 N Yost), so outlines traced on it landed off on the customer's map. Instead,
+// stitch the map's own tiles (zoom 19, the sharpest these have) to cover the same box,
+// and scale to the same pixel size so the rest of the code doesn't change.
+const TILE_ZOOM = 19;
+const tileXY = (lat, lng) => {
+  const n = 256 * 2 ** TILE_ZOOM, r = (lat * Math.PI) / 180;
+  return [((lng + 180) / 360) * n, ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n];
+};
+async function tilePhoto(box, size) {
+  const key = process.env.ARCGIS_API_KEY;
+  const [x0, y0] = tileXY(box.north, box.west);
+  const [x1, y1] = tileXY(box.south, box.east);
+  const tx0 = Math.floor(x0 / 256), ty0 = Math.floor(y0 / 256), tx1 = Math.floor(x1 / 256), ty1 = Math.floor(y1 / 256);
+  if ((tx1 - tx0 + 1) * (ty1 - ty0 + 1) > 49) throw new Error('too many tiles');
+  const jobs = [];
+  for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+    jobs.push((async () => {
+      const url = `https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/${TILE_ZOOM}/${ty}/${tx}?token=${encodeURIComponent(key)}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(15000), headers: { Referer: `${SITE}/` } });
+      if (!res.ok || !String(res.headers.get('content-type')).startsWith('image/')) throw new Error(`tile HTTP ${res.status}`);
+      return { input: Buffer.from(await res.arrayBuffer()), left: (tx - tx0) * 256, top: (ty - ty0) * 256 };
+    })());
+  }
+  const tiles = await Promise.all(jobs);
+  const left = Math.round(x0 - tx0 * 256), top = Math.round(y0 - ty0 * 256);
+  const w = Math.max(1, Math.round(x1 - x0)), h = Math.max(1, Math.round(y1 - y0));
+  const mosaic = await sharp({ create: { width: (tx1 - tx0 + 1) * 256, height: (ty1 - ty0 + 1) * 256, channels: 3, background: '#000' } })
+    .composite(tiles).png().toBuffer();
+  const dot = Buffer.from(`<svg width="${size}" height="${size}"><circle cx="${size / 2}" cy="${size / 2}" r="${Math.max(4, size / 160)}" fill="#ff0000" stroke="#fff" stroke-width="1.5"/></svg>`);
+  const out = await sharp(mosaic).extract({ left, top, width: w, height: h })
+    .resize(size, size, { kernel: 'lanczos3' }).composite([{ input: dot }]).jpeg({ quality: 88 }).toBuffer();
+  return out.toString('base64');
+}
+
 async function keyedPhoto(point, wide = false) {
   const key = process.env.ARCGIS_API_KEY;
   if (!key) return null;
   const size = wide ? WIDE.size : keyedSize(point.tapped);
   const zoom = wide ? WIDE.zoom : KEYED_ZOOM;
+  {
+    const box = mercatorBox(point, zoom, size);
+    try {
+      return { photo: await tilePhoto(box, size), box, size, span: spanMeters(box, point.lat), dot: true };
+    } catch (err) {
+      console.warn('[OUTLINE] map tiles failed, using Static Maps:', err.message);
+    }
+  }
   const url = 'https://static-maps-api.arcgis.com/arcgis/rest/services/static-maps-service/v1/static-maps/arcgis/imagery/with-point'
     + `?x=${point.lng}&y=${point.lat}&zoom=${zoom}&symbolStyle=circle&symbolScale=0.4&symbolColor=FF0000`
     + `&width=${size}&height=${size}&format=jpeg&token=${encodeURIComponent(key)}`;
@@ -142,7 +187,7 @@ Before the polygons, fill in layout: a few sentences describing this lot as you 
 In note, give one short sentence the customer will see (e.g. "Outlined your front and back lawns; check the edge by the driveway").
 
 In warnings, list for the business owner (not the customer) anything to double-check before pricing, one short sentence each naming the area, for example: "Back yard mostly under heavy tree cover; grass there isn't outlined", "Rear lot line unclear; back yard may extend further", "Back of the lot is out of the photo". Only real concerns; leave it empty if the outline looks complete. Never mention pixel coordinates in note or warnings; describe places in plain words ("south edge below the parking lot").${dot
-    ? `\n\nA small red dot marks ${tapped ? 'the spot they tapped (on their roof)' : 'the address point'}. The strip of credit text along the bottom edge is not part of the property.`
+    ? `\n\nA small red dot marks ${tapped ? 'the spot they tapped (on their roof)' : 'the address point'}. Any strip of credit text along the bottom edge is not part of the property.`
     : ''}`;
 }
 
@@ -192,7 +237,7 @@ async function findHouse(point) {
   const mid = shot.size / 2;
   const { out } = await ask(shot, `This is a straight-down satellite photo, ${shot.size}×${shot.size} pixels, about ${shot.span} meters across (north is up). The red dot at the center (pixel ${mid},${mid}) is where a customer's typed street address landed on the map. Address points are often on the street, sidewalk or driveway in front of the house instead of on the roof.
 
-Find the house this address belongs to: usually the closest house, facing the street the dot is on (if the dot is on a roof already, that's the house). Give the pixel at the middle of that house's main roof (not the garage) as x, y. If it's a large property instead of a house lot (a church, school, business, apartment complex or park, or its lawn clearly runs past the edge of this photo), give the middle of its main building and set large to true; for an ordinary house lot, large is false. If there's no building near the dot, set found to false. In reason, one short sentence on how you picked it. The strip of credit text along the bottom edge is not part of the map.`, HOUSE_SCHEMA, 'medium');
+Find the house this address belongs to: usually the closest house, facing the street the dot is on (if the dot is on a roof already, that's the house). Give the pixel at the middle of that house's main roof (not the garage) as x, y. If it's a large property instead of a house lot (a church, school, business, apartment complex or park, or its lawn clearly runs past the edge of this photo), give the middle of its main building and set large to true; for an ordinary house lot, large is false. If there's no building near the dot, set found to false. In reason, one short sentence on how you picked it. Any strip of credit text along the bottom edge is not part of the map.`, HOUSE_SCHEMA, 'medium');
   if (!out.found) return null;
   const [lat, lng] = pixelToLatLng(shot, out);
   return { lat, lng, large: Boolean(out.large) };

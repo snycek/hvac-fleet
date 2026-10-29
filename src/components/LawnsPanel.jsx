@@ -2,6 +2,7 @@ import { Fragment, memo, useState } from 'react';
 import { allLawns, money, shortDate } from '../lib/lawns.js';
 import { daysPastDue } from '../lib/invoices.js';
 import { relativeDay, repeatLabel } from '../lib/dates.js';
+import ChangeDayModal from './ChangeDayModal.jsx';
 import { formatSqFt } from '../lib/zones.js';
 
 const th = { padding: '10px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600, fontSize: '12px', whiteSpace: 'nowrap' };
@@ -9,8 +10,13 @@ const td = { padding: '10px 12px', whiteSpace: 'nowrap' };
 
 /** Every lawn at a glance: numbers only. Tap a row for its payment history. */
 // bare: no title (the hub panel shows its own) and no outer card.
-function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = false }) {
+// Change day: planFor(lawn) gives the next visit (demo: from its routes; live: lawn.nextVisit),
+// moveLawn(lawn, visit, plan) saves it.
+function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = false, foremen = [], planRoutes, moveLawn, planFor, pickDate = true }) {
   const [open, setOpen] = useState(null);
+  const [moving, setMoving] = useState(null); // { lawn, visit }
+  const visitOf = l => (planFor ? planFor(l) : l.nextVisit);
+  const nextOf = (l, visit) => (l.nextCut && (!visit || l.nextCut <= visit.date) ? l.nextCut : visit?.date || null);
   const lawns = allLawns(jobs).sort((a, b) => (b.owed - a.owed) || (b.cuts - a.cuts));
 
   if (!lawns.length) return null;
@@ -28,6 +34,8 @@ function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = fals
           <tbody>
             {lawns.map(l => {
               const isOpen = open === l.key;
+              const visit = visitOf(l);
+              const next = nextOf(l, visit);
               return (
                 <Fragment key={l.key}>
                   <tr onClick={() => setOpen(isOpen ? null : l.key)} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer', background: isOpen ? 'var(--bg-elevated)' : 'transparent' }}>
@@ -40,7 +48,7 @@ function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = fals
                     <td style={{ ...td, color: '#3fb950', fontWeight: 600 }}>{money(l.paid)}</td>
                     <td style={{ ...td, color: l.owed ? '#f0b429' : 'var(--text-muted)', fontWeight: 600 }}>{l.owed ? money(l.owed) : '—'}</td>
                     <td style={td}>{shortDate(l.lastCut)}</td>
-                    <td style={td}>{l.nextCut ? relativeDay(l.nextCut, today) : '—'}</td>
+                    <td style={td}>{next ? relativeDay(next, today) : '—'}{visit?.regularDate && next === visit.date ? <span title="Moved just this once" aria-label="moved once"> ↪</span> : ''}</td>
                   </tr>
                   {isOpen && (
                     <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg-elevated)' }}>
@@ -50,6 +58,9 @@ function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = fals
                           {openCustomer && <button type="button" className="addr-link" onClick={e => { e.stopPropagation(); openCustomer(l.key); }}>📇 Payments & contact history</button>}
                           {l.price != null && <span>💲{l.price}/cut</span>}
                           {l.repeatDays > 0 && <span>🔁 {repeatLabel(l.repeatDays)}</span>}
+                          {moveLawn && visit && l.repeatDays > 0 && (
+                            <button type="button" className="addr-link move-day-btn" onClick={e => { e.stopPropagation(); setMoving({ lawn: l, visit }); }}>📅 Change day</button>
+                          )}
                           {l.sqFt && <span>📐 {formatSqFt(l.sqFt)}</span>}
                         </div>
                         {l.notes && <div style={{ fontSize: '13px', marginBottom: '10px' }}>📝 {l.notes}</div>}
@@ -87,6 +98,10 @@ function LawnsPanel({ jobs, markPaid, today, settings, openCustomer, bare = fals
           </tbody>
         </table>
       </div>
+      {moving && (
+        <ChangeDayModal lawn={moving.lawn} visit={moving.visit} foremen={foremen} planRoutes={planRoutes} today={today} pickDate={pickDate}
+          onSave={plan => moveLawn(moving.lawn, moving.visit, plan)} onClose={() => setMoving(null)} />
+      )}
     </section>
   );
 }

@@ -242,6 +242,15 @@ export function useJobs({ live = true } = {}) {
     if (Array.isArray(fresh)) setJobs(fresh);
   }, []);
 
+  // Owner moves a lawn's next cut: { scheduledDate, techId, mode: 'once' | 'always' }.
+  const rescheduleJob = useCallback(async (jobId, plan) => {
+    const res = await fetch(`/api/jobs/${jobId}/reschedule`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't move it (HTTP ${res.status})`);
+    setJobs(prev => prev.map(j => (j.id === jobId ? data : j)));
+    return data;
+  }, []);
+
   // Checks on the way: the owner notes one (customer called), then marks it received or bounced.
   const reloadJobs = useCallback(async () => {
     const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
@@ -269,5 +278,5 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, [reloadJobs]);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
 }

@@ -15,7 +15,7 @@ function ActivityFeed({ jobs, expenses, technicians, delays = [], shifts = [], p
     for (const j of jobs) {
       for (const r of j.reminders || []) {
         if (r.kind === 'heads_up' && dayOf(r.at) === today) {
-          out.push({ key: `h-${r.id}`, at: r.at, icon: '📲', text: <>On-the-way {r.channel === 'email' ? 'email' : 'text'} to <b>{String(j.clientName || '').split(' ')[0]}</b> · {street(j.address)}</>, amount: '', tone: 'note' });
+          out.push({ key: `h-${j.id}-${r.id}`, at: r.at, icon: '📲', text: <>On-the-way {r.channel === 'email' ? 'email' : 'text'} to <b>{String(j.clientName || '').split(' ')[0]}</b> · {street(j.address)}</>, amount: '', tone: 'note' });
         }
       }
       if (j.status === 'skipped' && j.skippedAt && jobDay(j, today) === today) {

@@ -21,7 +21,9 @@ export function lawnStats(jobs, key) {
   const timed = cuts.filter(j => j.startedAt && j.completedAt)
     .map(j => minutesBetween(j.startedAt, j.completedAt))
     .filter(m => m >= 3 && m < 600);
-  const upcoming = all.filter(j => !['completed', 'skipped'].includes(j.status)).map(j => j.scheduledDate || todayString()).sort();
+  const open = all.filter(j => !['completed', 'skipped'].includes(j.status))
+    .sort((a, b) => String(a.scheduledDate || todayString()).localeCompare(String(b.scheduledDate || todayString())));
+  const upcoming = open.map(j => j.scheduledDate || todayString());
   const latest = all.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] || {};
   const withNotes = all.find(j => customerNotes(j));
   return {
@@ -38,6 +40,12 @@ export function lawnStats(jobs, key) {
     owed: cuts.filter(j => !j.paid).reduce((s, j) => s + (j.earnings || 0), 0),
     lastCut: cuts[0]?.completedAt || null,
     nextCut: upcoming[0] || null,
+    // The visit the owner can move (not started yet). regularDate = moved just this once.
+    nextVisit: open[0] && ['pending', 'assigned'].includes(open[0].status)
+      ? { id: open[0].id, date: open[0].scheduledDate || todayString(), techId: open[0].assignedTo || null, regularDate: open[0].regularDate || null, regularTech: open[0].regularTech || null }
+      : null,
+    location: latest.location || null,
+    lawnId: latest.lawnId || null,
     notes: withNotes ? customerNotes(withNotes) : '',
     history: cuts,
   };
@@ -116,6 +124,8 @@ const inRange = (dateString, { from, to }) => Boolean(dateString) && dateString 
 export const jobDay = (j, today = todayString()) => j.scheduledDate || (j.status === 'completed' ? dayOf(j.completedAt) : today);
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** 'Thursday' for a 'YYYY-MM-DD'. */
+export const weekdayName = dateString => (dateString ? d12(dateString).toLocaleDateString('en-US', { weekday: 'long' }) : '');
 export const weekdayIndex = dateString => (d12(dateString).getDay() + 6) % 7;
 
 export const EXPENSE_TYPES = [

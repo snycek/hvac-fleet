@@ -450,12 +450,15 @@ app.put('/api/jobs/:id/status', (req, res) => {
   if (finished(status) && !finished(currentJob.status) && updatedJob.repeatDays > 0) {
     // The next visit copies the customer + schedule, never this visit's own history
     // (reminders, a check on the way, payment problems, skip notes).
-    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, ...carry } = updatedJob;
+    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, regularDate: _rd, regularTech: _rt, movedAt: _ma, ...carry } = updatedJob;
+    // Moved just this once? The next one is back on the regular day with the regular crew.
+    const crew = updatedJob.regularTech || updatedJob.assignedTo || null;
     nextJob = {
       ...carry,
       id: createJobId(),
-      status: updatedJob.assignedTo ? 'assigned' : 'pending',
-      scheduledDate: addDays(updatedJob.scheduledDate || todayString(), updatedJob.repeatDays),
+      assignedTo: crew,
+      status: crew ? 'assigned' : 'pending',
+      scheduledDate: addDays(updatedJob.regularDate || updatedJob.scheduledDate || todayString(), updatedJob.repeatDays),
       completedAt: null,
       enRouteAt: null,
       startedAt: null,
@@ -524,6 +527,32 @@ app.put('/api/jobs/:id/schedule', (req, res) => {
   };
   jobs[idx] = updatedJob;
   return res.json(updatedJob);
+});
+
+// Owner moves a lawn's next cut. mode 'once': just this visit (the one after goes back
+// to the regular day + crew). mode 'always': this becomes their regular day from now on.
+app.put('/api/jobs/:id/reschedule', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  const job = jobs[idx];
+  if (!['pending', 'assigned'].includes(job.status)) return res.status(400).json({ error: 'The crew already started this visit.' });
+  const scheduledDate = String(req.body?.scheduledDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) return res.status(400).json({ error: 'scheduledDate (YYYY-MM-DD) is required' });
+  if (scheduledDate < todayString()) return res.status(400).json({ error: 'Pick today or a later day.' });
+  const techId = req.body?.techId || job.assignedTo || null;
+  if (techId && !technicians.some((t) => t.id === techId)) return res.status(400).json({ error: 'Unknown foreman.' });
+  const once = req.body?.mode === 'once';
+
+  const { regularDate: _rd, regularTech: _rt, ...rest } = job;
+  const updated = { ...rest, scheduledDate, assignedTo: techId, status: techId ? 'assigned' : job.status, movedAt: new Date().toISOString() };
+  if (once) {
+    const regularDate = job.regularDate || job.scheduledDate;
+    const regularTech = job.regularTech || job.assignedTo || null;
+    // Moving it back to its usual spot just clears the one-time move.
+    if (regularDate !== scheduledDate || regularTech !== techId) Object.assign(updated, { regularDate, regularTech });
+  }
+  jobs[idx] = updated;
+  return res.json(updated);
 });
 
 // Owner marks a finished cut paid (or un-paid if tapped by mistake).

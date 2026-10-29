@@ -273,7 +273,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
 
   // Accept quote: where would this address fit best? Demo uses its weekly routes; live
   // looks at each foreman's scheduled stops over the next 5 weekdays.
-  const livePlanRoutes = job => {
+  // exclude: a lawn key to leave out (moving that lawn to another day).
+  const livePlanRoutes = (job, { exclude = null } = {}) => {
     const crews = technicians.filter(t => t.kind !== 'plow' && t.status !== 'pending_approval');
     const routes = [];
     for (let i = 1, n = 0; n < 5 && i < 10; i++) {
@@ -282,7 +283,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
       if (wd === 0 || wd === 6) continue;
       n++;
       for (const t of crews) {
-        const stops = allJobs.filter(j => j.assignedTo === t.id && j.scheduledDate === date && j.location?.lat && !['quote', 'declined'].includes(j.status))
+        const stops = allJobs.filter(j => j.assignedTo === t.id && j.scheduledDate === date && j.location?.lat && !['quote', 'declined'].includes(j.status) && (!exclude || lawnKey(j) !== exclude))
           .map(j => ({ id: j.id, lat: j.location.lat, lng: j.location.lng, label: j.address }));
         const depot = t.location?.lat ? t.location : stops[0] || job.location;
         routes.push({ key: `${date}:${t.id}`, day: wd, date, depot, dayShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][wd],
@@ -293,6 +294,14 @@ export default function OwnerView({ demoOnly = false } = {}) {
     return rankRoutes(routes, job.location, job.location);
   };
   const planRoutes = demoOn ? sim.planRoutes : livePlanRoutes;
+  // Lawns list: change a lawn's cut day (just the next cut, or their regular day).
+  const lawnsMove = {
+    foremen: technicians.filter(t => t.kind !== 'plow' && t.status !== 'pending_approval' && (!demoOn || t.status !== 'offline')),
+    planRoutes,
+    pickDate: !demoOn,
+    planFor: demoOn ? (l => (l.lawnId ? sim.lawnPlan(l.lawnId) : null)) : null,
+    moveLawn: demoOn ? (l, _v, plan) => sim.moveLawn(l.lawnId, plan) : (_l, v, plan) => live.rescheduleJob(v.id, plan),
+  };
 
   // Today's visits for one truck (route order) or every truck.
   // Door invoices are only for customers billed per visit (monthly ones get a statement).
@@ -606,7 +615,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           {phoneTab === 'customers' && (
             <section className="phone-card">
               <CustomerSearch jobs={allJobs} onPick={key => setCustomerKey(key)} />
-              <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} />
+              <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} {...lawnsMove} />
             </section>
           )}
           {phoneTab === 'crew' && (
@@ -688,7 +697,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
                   onSend={sendStatements} onPrint={printStatements} openCustomer={key => setCustomerKey(key)} assumeSentBefore={assumeSentBefore} />
               ) : (
-                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} />
+                <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} {...lawnsMove} />
               )}
             </div>}
           </section>

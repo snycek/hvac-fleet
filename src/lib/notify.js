@@ -24,7 +24,8 @@ export function headsUpRecord(job, companyName, at) {
   const channel = remindBy(job);
   if (!channel) return null;
   return {
-    id: `otw_${Date.now().toString(36)}_${String(job.id).replace(/[^\w]/g, '').slice(-8)}`,
+    // Full visit id: several can go out in the same millisecond (the demo).
+    id: `otw_${Date.now().toString(36)}_${String(job.id).replace(/[^\w]/g, '')}`,
     at, kind: 'heads_up', channel, to: addressFor(job, channel), by: 'Auto',
     message: arrivalMessage(job, companyName), delivered: false,
   };

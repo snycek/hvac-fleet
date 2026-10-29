@@ -107,10 +107,17 @@ const isPlow = (w, t) => t >= w.truckCount;
 const driverOf = (w, t) => (isPlow(w, t) ? PLOWS[t - w.truckCount] : FOREMEN[t]);
 // Accepted quotes change a weekday route from a date on: custom[`${day}:${truck}`] =
 // [{ from, route }] (the latest one in effect wins). New lawns live in w.extraLawns.
+// An entry with `only` is a one-time change for that date (a lawn moved just this once).
+// Otherwise the entry with the latest `from` on/before the date wins (ties: newest).
+const regularRoute = (list, day, truck, date) => {
+  let best = null;
+  for (const e of list) if (!e.only && date >= e.from && (!best || e.from >= best.from)) best = e;
+  return best ? best.route : ROUTES[day][truck];
+};
 const routeFor = (custom, day, truck, date) => {
   const list = custom?.[`${day}:${truck}`] || [];
-  for (let i = list.length - 1; i >= 0; i--) if (date >= list[i].from) return list[i].route;
-  return ROUTES[day][truck];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].only === date) return list[i].route;
+  return regularRoute(list, day, truck, date);
 };
 const routeOf = (w, t) => (isPlow(w, t) ? PLOW_ROUTES[t - w.truckCount] : routeFor(w.custom, w.day, t, addDays(w.weekStart, w.day)));
 const stopById = (id, w) => lawnById[id] || w?.extraLawns?.[id] || lotById[id];
@@ -122,6 +129,37 @@ function straightLeg(a, b, to) {
   const m = metersBetween(path[0], path[1]);
   return { to, meters: Math.round(m), seconds: Math.round(m / 8), path, cum: [0, m], length: m, straight: true };
 }
+// Take a stop out of a route (the truck drives straight from the stop before to the one after).
+function removeStop(route, id, w) {
+  const i = route.stops.indexOf(id);
+  if (i < 0) return route;
+  const pt = s => (s === 'depot' ? DEPOT_PT : stopById(s, w));
+  const prev = i === 0 ? DEPOT_PT : pt(route.stops[i - 1]);
+  const nextId = route.legs[i + 1].to;
+  const stops = route.stops.filter(s => s !== id);
+  const legs = [...route.legs];
+  legs.splice(i, 2, straightLeg(prev, pt(nextId), nextId));
+  return { ...route, stops, legs };
+}
+// Put a lawn at its cheapest spot in a route (or at index, if given).
+function addStop(route, lawn, w, index = null) {
+  if (route.stops.includes(lawn.id)) return route;
+  const at = index ?? bestInsertion(route.stops.map(s => ({ id: s, ...stopById(s, w) })), DEPOT_PT, lawn).index;
+  return insertStop(route, lawn, Math.min(at, route.stops.length), w);
+}
+// Change one weekday route from a date on: later changes get the same edit, so nothing stacks wrong.
+function editFrom(custom, key, from, edit) {
+  const [d, t] = key.split(':').map(Number);
+  const list = custom?.[key] || [];
+  const later = list.map(e => ((e.only ? e.only >= from : e.from > from) ? { ...e, route: edit(e.route) } : e));
+  return { ...custom, [key]: [...later, { from, route: edit(regularRoute(list, d, t, from)) }] };
+}
+// Change one weekday route on one date only.
+function editOnly(custom, key, date, edit) {
+  const [d, t] = key.split(':').map(Number);
+  return { ...custom, [key]: [...(custom?.[key] || []), { only: date, route: edit(routeFor(custom, d, t, date)) }] };
+}
+
 // Put a lawn into a route before stops[index] (index === stops.length → last stop).
 function insertStop(route, lawn, index, w) {
   const pt = id => (id === 'depot' ? DEPOT_PT : stopById(id, w));
@@ -267,9 +305,10 @@ function lotJob(lot) {
 // Today's list: every lawn on this weekday's routes (not in winter), plus every
 // plow lot when it snows.
 function jobsForDay(date, day, trucks, w = null) {
-  const lawns = isWinter(date) ? [] : Array.from({ length: trucks }, (_, t) => routeFor(w?.custom, day, t, date)).flatMap(route => route.stops.map(id => ({
+  const lawns = isWinter(date) ? [] : Array.from({ length: trucks }, (_, t) => routeFor(w?.custom, day, t, date)).flatMap((route, t) => route.stops.map(id => ({
     ...baseJob(stopById(id, w)),
     ...(w?.prefs?.[id] || {}),
+    assignedTo: FOREMEN[t].id,
     id: `${id}@${date}`,
     status: 'assigned',
     scheduledDate: date,
@@ -799,7 +838,7 @@ export function useDemoSim(start = {}) {
 
   // ---- New customers from quotes ----
   // Every weekday × truck, with the best spot for this address, cheapest first.
-  const planRoutes = useCallback(job => {
+  const planRoutes = useCallback((job, { exclude = null } = {}) => {
     const w = worldRef.current;
     const routes = [];
     for (let d = 0; d < 5; d++) {
@@ -810,7 +849,7 @@ export function useDemoSim(start = {}) {
           key: `${d}:${t}`, day: d, date, dayShort: DAY_SHORT[d],
           dayLabel: new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' }),
           techId: FOREMEN[t].id, techName: FOREMEN[t].name, truckName: FOREMEN[t].truckName,
-          stops: route.stops.map(id => { const l = stopById(id, w); return { id, lat: l.lat, lng: l.lng, label: l.address }; }),
+          stops: route.stops.filter(id => id !== exclude).map(id => { const l = stopById(id, w); return { id, lat: l.lat, lng: l.lng, label: l.address }; }),
         });
       }
     }
@@ -831,7 +870,7 @@ export function useDemoSim(start = {}) {
     if (wd > 4) { date = addDays(date, 7 - wd); wd = 0; }
     const today = addDays(w.weekStart, w.day);
     while (date <= today) date = addDays(date, 7);
-    const base = routeFor(w.custom, wd, t, date);
+    const base = regularRoute((w.custom || {})[`${wd}:${t}`] || [], wd, t, date);
     const id = `nw-${Object.keys(w.extraLawns || {}).length + 1}`;
     const lawn = {
       id, name: job.clientName, address: job.address, lat: job.location.lat, lng: job.location.lng,
@@ -844,7 +883,8 @@ export function useDemoSim(start = {}) {
       : bestInsertion(base.stops.map(s => ({ id: s, ...stopById(s, w) })), DEPOT_PT, lawn).index;
     const route = insertStop(base, lawn, index, { ...w, extraLawns });
     const key = `${wd}:${t}`;
-    const custom = { ...(w.custom || {}), [key]: [...((w.custom || {})[key] || []), { from: date, route }] };
+    const later = ((w.custom || {})[key] || []).map(e => ((e.only ? e.only >= date : e.from > date) ? { ...e, route: addStop(e.route, lawn, { ...w, extraLawns }) } : e));
+    const custom = { ...(w.custom || {}), [key]: [...later, { from: date, route }] };
     const next = {
       ...w, custom, extraLawns,
       // The quote becomes their first scheduled cut (like the server does), so they're a
@@ -872,6 +912,67 @@ export function useDemoSim(start = {}) {
     }
     return { date, day: wd, truck: t };
   }, [commitWorld]);
+
+  // ---- Moving a lawn to another day ----
+  // Where a lawn is: its regular weekday route + truck, and its next cut (a one-time move wins).
+  const lawnPlan = useCallback(lawnId => {
+    const w = worldRef.current;
+    let regular = null;
+    let next = null;
+    for (let d = 0; d < 5; d++) {
+      const date = nextDateFor(w, d);
+      for (let t = 0; t < w.truckCount; t++) {
+        const list = w.custom?.[`${d}:${t}`] || [];
+        if (!regular && regularRoute(list, d, t, date).stops.includes(lawnId)) regular = { day: d, truck: t, date };
+        if (routeFor(w.custom, d, t, date).stops.includes(lawnId) && (!next || date < next.date)) next = { day: d, truck: t, date };
+      }
+    }
+    if (!next) return null;
+    const moved = !regular || regular.day !== next.day || regular.truck !== next.truck;
+    return {
+      date: next.date, techId: FOREMEN[next.truck].id,
+      regularDate: moved && regular ? regular.date : null, regularTech: moved && regular ? FOREMEN[regular.truck].id : null,
+    };
+  }, [world.custom, world.day, world.week, world.truckCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // plan: { mode: 'once' | 'always', scheduledDate, techId, slot? }
+  const moveLawn = useCallback(async (lawnId, plan) => {
+    const w = worldRef.current;
+    const lawn = stopById(lawnId, w);
+    const now = lawnPlan(lawnId);
+    if (!lawn || !now) throw new Error('No upcoming cut to move.');
+    let t = FOREMEN.findIndex(f => f.id === plan.techId);
+    if (t < 0 || t >= w.truckCount) t = 0;
+    let date = plan.scheduledDate;
+    let wd = (new Date(`${date}T12:00:00`).getDay() + 6) % 7;
+    if (wd > 4) { date = addDays(date, 7 - wd); wd = 0; }
+    const today = addDays(w.weekStart, w.day);
+    while (date <= today) date = addDays(date, 7);
+    const index = plan.slot && plan.slot.day === wd && plan.slot.techId === FOREMEN[t].id ? plan.slot.index : null;
+    const newKey = `${wd}:${t}`;
+    const fromTruck = FOREMEN.findIndex(f => f.id === now.techId);
+    const fromDay = (new Date(`${now.date}T12:00:00`).getDay() + 6) % 7;
+    const oldKey = `${fromDay}:${fromTruck}`;
+    const remove = r => removeStop(r, lawnId, w);
+    const add = (r, i = null) => addStop(remove(r), lawn, w, i);
+    let custom = w.custom || {};
+    if (plan.mode === 'once') {
+      custom = editOnly(custom, oldKey, now.date, remove);
+      custom = editOnly(custom, newKey, date, r => add(r, index));
+    } else {
+      // Off every route from tomorrow, then onto the new one from its first date.
+      const tomorrow = addDays(today, 1);
+      for (let d = 0; d < 5; d++) for (let tt = 0; tt < w.truckCount; tt++) {
+        const k = `${d}:${tt}`;
+        const there = ROUTES[d][tt].stops.includes(lawnId) || (custom[k] || []).some(e => e.route.stops.includes(lawnId));
+        if (there) custom = editFrom(custom, k, tomorrow, remove);
+      }
+      custom = editFrom(custom, newKey, date, r => add(r, index));
+    }
+    const extraLawns = w.extraLawns?.[lawnId] ? { ...w.extraLawns, [lawnId]: { ...w.extraLawns[lawnId], day: wd, truck: t } } : w.extraLawns;
+    commitWorld({ ...w, custom, extraLawns, lastEvent: `📅 ${lawn.name} ${plan.mode === 'once' ? 'moved once' : 'now cut'} · ${DAY_SHORT[wd]} · ${FOREMEN[t].truckName}` });
+    return { date, day: wd, truck: t };
+  }, [commitWorld, lawnPlan]);
 
   const declineQuote = useCallback(async jobId => {
     const w = worldRef.current;
@@ -935,6 +1036,7 @@ export function useDemoSim(start = {}) {
     start: world.start,
     planRoutes,
     scheduleQuote,
+    lawnPlan, moveLawn,
     declineQuote,
     payments: world.payments || [],
     cutToday: todays.filter(j => j.status === 'completed').length,

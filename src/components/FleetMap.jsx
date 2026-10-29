@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { TECH_STATUS, statusOf } from '../lib/constants.js';
-import { lawnKey, lawnStats } from '../lib/lawns.js';
+import { jobDay, lawnKey, lawnStats } from '../lib/lawns.js';
+import { todayString } from '../lib/dates.js';
 
 // Fix Leaflet default icon URLs broken by Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -128,16 +129,14 @@ function makeVanIcon(status, name) {
   });
 }
 
-function buildPopup(tech, jobs, statusInfo, color) {
-  const today = new Date().toISOString().split('T')[0];
+// today = the hub's date (the demo runs on its own calendar). Same rule as the route
+// cards: this truck's stops for today; earned = the ones finished.
+function buildPopup(tech, jobs, statusInfo, color, today) {
   const techJobs = jobs.filter(j => j.assignedTo === tech.id);
-  const completedToday = techJobs.filter(j =>
-    j.status === 'completed' && (j.completedAt || j.createdAt || '').startsWith(today)
-  );
-  const totalCompleted = techJobs.filter(j => j.status === 'completed').length;
-  // fallback: if no "today" completed jobs, show all completed (demo data)
-  const completedForEarnings = completedToday.length ? completedToday : techJobs.filter(j => j.status === 'completed');
-  const dailyEarnings = completedForEarnings.reduce((s, j) => s + (j.earnings || 0), 0);
+  const todays = techJobs.filter(j => jobDay(j, today) === today && !['quote', 'declined', 'skipped'].includes(j.status));
+  const doneToday = todays.filter(j => j.status === 'completed');
+  const dailyEarnings = doneToday.reduce((s, j) => s + (j.earnings || 0), 0);
+  const plow = tech.kind === 'plow';
   // The lawn they're on (cutting first, then driving to, then next up).
   const activeJob = ['in_progress', 'en_route', 'assigned'].map(s => techJobs.find(j => j.status === s)).find(Boolean);
   const lawn = activeJob ? lawnStats(jobs, lawnKey(activeJob)) : null;
@@ -164,8 +163,8 @@ function buildPopup(tech, jobs, statusInfo, color) {
           <div style="font-size:10px;color:#888;margin-top:1px">Today's Earnings</div>
         </div>
         <div style="background:#f5f5f5;border-radius:8px;padding:8px 10px;text-align:center">
-          <div style="font-size:16px;font-weight:800;color:#1a5cbf">${totalCompleted}</div>
-          <div style="font-size:10px;color:#888;margin-top:1px">Cuts Done</div>
+          <div style="font-size:16px;font-weight:800;color:#1a5cbf">${doneToday.length}<span style="font-size:11px;color:#888;font-weight:600"> of ${todays.length}</span></div>
+          <div style="font-size:10px;color:#888;margin-top:1px">${plow ? 'Plowed' : 'Cut'} Today</div>
         </div>
       </div>
 
@@ -197,7 +196,7 @@ const LAWN_COLORS = { completed: '#3fb950', in_progress: '#e67e22', en_route: '#
  * fitBounds: optional [[lat, lng], [lat, lng]] to frame the map (e.g. demo area).
  * outline: optional { ring: [[lat, lng], ...], label } service-area boundary (dashed).
  */
-export default function FleetMap({ technicians = [], jobs = [], selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false, onPickCustomer = null }) {
+export default function FleetMap({ technicians = [], jobs = [], today = todayString(), selectedTechId = null, lawns = null, bursts = null, fitBounds = null, outline = null, lots = null, snowing = false, onPickCustomer = null }) {
   const lotLayer   = useRef(null);
   // Click a lawn or lot → that customer's card (kept in a ref so markers don't rebuild).
   const pickRef = useRef(onPickCustomer);
@@ -347,7 +346,7 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
       const pos        = [tech.location.lat, tech.location.lng];
       const statusInfo = statusOf(tech) || { label: tech.status };
       const color      = STATUS_COLORS[tech.status] || '#8b949e';
-      const popup      = buildPopup(tech, jobs, statusInfo, color);
+      const popup      = buildPopup(tech, jobs, statusInfo, color, today);
 
       const existing = markersRef.current[tech.id];
       if (existing) {
@@ -377,7 +376,7 @@ export default function FleetMap({ technicians = [], jobs = [], selectedTechId =
         delete markersRef.current[id];
       }
     });
-  }, [technicians, jobs]);
+  }, [technicians, jobs, today]);
 
   // Focus the truck picked in the crew list (once per pick, so moving trucks don't yank the map).
   useEffect(() => {

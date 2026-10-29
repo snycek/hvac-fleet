@@ -217,7 +217,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
             <button type="button" className="btn-ghost" aria-label="Next week" disabled={isThisWeek} onClick={() => setAnchor(addDays(weekStart, 7))}>›</button>
             {!isThisWeek && <button type="button" className="btn-ghost" onClick={() => setAnchor(null)}>This week</button>}
           </div>
-          <button type="button" className="btn-primary" disabled={!unpaidIds.length}
+          <button type="button" className="btn-primary pay-mark-all" disabled={!unpaidIds.length}
             onClick={() => { if (window.confirm(`Mark ${unpaidIds.length} people paid for ${weekLabel}? (${money(totals.unpaid)})`)) setPaid(weekStart, unpaidIds, true); }}>
             ✓ Mark all paid
           </button>

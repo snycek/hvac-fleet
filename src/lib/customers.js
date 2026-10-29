@@ -4,6 +4,7 @@
 import { customerNotes as customerNoteText, lawnKey } from './lawns.js';
 import { billingMode, daysPastDue, dueDateFor, invoiceNumber, serviceDate, serviceLabel } from './invoices.js';
 import { contactPref } from './billing.js';
+import { lastPaymentContact } from './notify.js';
 import { METHODS } from './payments.js';
 import { addDays } from './dates.js';
 
@@ -38,7 +39,8 @@ export function customerHistory({ jobs, payments = [], key, today, settings }) {
     service: serviceLabel(j),
     invoiceNo: invoiceNumber(j),
     amount: j.earnings || 0,
-    status: j.paid ? 'paid' : j.status === 'completed' ? 'open' : 'upcoming',
+    status: j.paid ? 'paid' : j.status === 'completed' ? 'open' : j.status === 'skipped' ? 'skipped' : 'upcoming',
+    skipReason: j.skipReason || null,
     paidAt: j.paidAt || null,
     method: j.paymentMethod || null,
     age: j.status === 'completed' && !j.paid ? days(serviceDate(j), today) : null,
@@ -95,6 +97,7 @@ export function customerHistory({ jobs, payments = [], key, today, settings }) {
     daysLate: Math.max(0, ...open.map(v => v.late)),
     contactPref: contactPref(latest),
     billing: latest.id ? billingMode(latest) : 'monthly',
+    notifyArrival: Boolean(latest.notifyArrival),
     visits,
     payments: paymentRows,
     contacts: contactsFor(mine),
@@ -131,7 +134,7 @@ export function pastDueCustomers(jobs, today, minDays = 1, settings) {
     const late = open.map(j => daysPastDue(j, today, settings));
     const oldest = Math.max(0, ...late);
     if (oldest < Math.max(1, minDays)) continue;
-    const last = contactsFor(jobs.filter(j => lawnKey(j) === key))[0];
+    const last = lastPaymentContact(contactsFor(jobs.filter(j => lawnKey(j) === key)));
     const recentlyReminded = !!last && String(last.at).slice(0, 10) > addDays(today, -REMIND_GAP_DAYS);
     const latest = open[open.length - 1];
     out.push({

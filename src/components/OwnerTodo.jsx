@@ -8,6 +8,7 @@ import { REMIND_GAP_DAYS, contactsFor, nextReminderDate, pastDueCustomers } from
 import { daysPastDue, dueDateFor } from '../lib/invoices.js';
 import { monthName } from '../lib/billing.js';
 import { housekeepingItems, todoCount } from '../lib/todo.js';
+import { isHeadsUp, lastPaymentContact } from '../lib/notify.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
@@ -128,7 +129,8 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   const behind = pastDueCustomers(jobs, today, threshold, settings).filter(matches);
   const accounts = behind.map(c => {
     const contacts = contactsFor(jobs.filter(j => lawnKey(j) === c.key));
-    return { ...c, latest: c.jobs[c.jobs.length - 1], lastReminder: contacts[0] || null, reminders: contacts.length };
+    const pay = contacts.filter(x => !isHeadsUp(x)); // on-the-way texts aren't reminders
+    return { ...c, latest: c.jobs[c.jobs.length - 1], lastReminder: pay[0] || null, reminders: pay.length };
   });
   const shownUnpaid = accounts.flatMap(a => a.jobs);
   // Reminded this week, or a check/cash on the way: nothing for John to do yet, so they
@@ -354,7 +356,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   <span className="row-actions">
                     {job.paymentIssue.method !== 'check' && <button type="button" className="btn-ghost remind-btn" disabled={paying === job.id} onClick={() => record(job, 'card', '4242')} title="Try the charge again">↻ Retry card</button>}
                     {remindCustomer && (() => {
-                      const wait = nextReminderDate(contactsFor(jobs.filter(j => lawnKey(j) === lawnKey(job)))[0], today);
+                      const wait = nextReminderDate(lastPaymentContact(contactsFor(jobs.filter(j => lawnKey(j) === lawnKey(job)))), today);
                       return <button type="button" className="btn-ghost remind-btn" disabled={!!wait || reminding === job.id} onClick={() => remind(job)} title={wait ? `One reminder per week. Next on ${shortDate(wait)}.` : 'Send a payment reminder'}>{wait ? `🔔 ${shortDate(wait)}` : '🔔 Remind'}</button>;
                     })()}
                   </span>

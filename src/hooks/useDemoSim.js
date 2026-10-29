@@ -6,6 +6,8 @@ import { lawnKey } from '../lib/lawns.js';
 import { estimatePrice } from '../lib/zones.js';
 import { bestInsertion, rankRoutes } from '../lib/routeFit.js';
 import { applyPaymentResult, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from '../lib/payments.js';
+import { headsUpRecord, wantsHeadsUp } from '../lib/notify.js';
+import { COMPANY_INFO } from '../data/services.js';
 
 // Owner demo: two trucks working ZIP 48101 on a weekly cycle (Mon–Fri, 16 lawns
 // per truck per day). Each truck drives real road paths "En Route", switches to
@@ -176,6 +178,8 @@ const cardFor = key => CARD_LAST4[hash(key.split('@')[0]) % CARD_LAST4.length];
 const declinesFirst = key => hash(`${key}!`) % 14 === 0;
 
 const cutMinutes = key => 16 + (hash(key) % 15); // 16–30 min per residential lawn
+// About 1 stop in 45 gets skipped when the crew pulls up.
+const skipFor = key => (hash(`${key}~`) % 45 === 0 ? (hash(`${key}^`) % 2 ? 'Customer asked' : 'Gate locked / no access') : null);
 
 // Standard outlines for demo customers (as if they'd outlined them on the website):
 // lawns get a front and back yard box sized to their price ($5 per 500 sq ft);
@@ -218,9 +222,10 @@ function lotOutline(lot) {
 // 9th wants paper (made-up example.com addresses, never real ones).
 const demoEmail = name => `${String(name).toLowerCase().replace(/[^a-z ]/g, '').trim().replace(/ +/g, '.')}@example.com`;
 function demoContact(n, name) {
-  if (n % 9 === 0) return { contactPref: 'paper' };
-  if (n % 4 === 0) return { clientEmail: demoEmail(name), contactPref: 'email' };
-  return {};
+  const otw = n % 3 === 0 ? { notifyArrival: true } : {}; // about 1 in 3 wants an on-the-way text
+  if (n % 9 === 0) return { contactPref: 'paper', ...otw };
+  if (n % 4 === 0) return { clientEmail: demoEmail(name), contactPref: 'email', ...otw };
+  return otw;
 }
 
 function baseJob(lawn) {
@@ -235,6 +240,7 @@ function baseJob(lawn) {
     earnings: lawn.price,
     repeatDays: 7,
     lawnId: lawn.id,
+    ...(lawn.notifyArrival ? { notifyArrival: true } : {}),
     ...(lawn.quote ? { quote: lawn.quote, notes: lawn.notes, requested: lawn.requested } : { quote: lawnOutline(lawn) }),
   };
 }
@@ -513,6 +519,13 @@ export function useDemoSim(start = {}) {
       let changed = false; // only rebuild the big job list when something happens
       const setTech = (techId, patch) => { technicians = technicians.map(t => (t.id === techId ? { ...t, ...patch } : t)); changed = true; };
       const setJob = (jobId, patch) => { jobs = jobs.map(j => (j.id === jobId ? { ...j, ...patch } : j)); changed = true; };
+      // Crew heading to a lawn whose customer wants the on-the-way text: send (log) it.
+      const headsUp = (jobId, when) => {
+        const j = jobs.find(x => x.id === jobId);
+        if (!wantsHeadsUp(j)) return;
+        const rec = headsUpRecord(j, COMPANY_INFO.name, iso(when));
+        if (rec) setJob(jobId, { reminders: [...(j.reminders || []), rec] });
+      };
 
       // Overnight: roll to the next workday, collect payments, load the new route.
       if (w.trucks.every(s => s.phase === 'done')) {
@@ -569,7 +582,8 @@ export function useDemoSim(start = {}) {
         commitWorld({
           ...w, weekStart, day, week, night: 0, expenses, payments, lastEvent,
           dayCount: w.dayCount + 1,
-          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount, w), ...(newQuote ? [newQuote] : [])],
+          // (skip any visit that already exists, e.g. a new customer's first cut made when approved)
+          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount, w).filter(nj => !jobs.some(j => j.id === nj.id)), ...(newQuote ? [newQuote] : [])],
           quotesSent: quotesSent + (newQuote ? 1 : 0),
           technicians: crewFor(next, w.truckCount),
           trucks: freshTrucks(next, w.truckCount),
@@ -610,7 +624,7 @@ export function useDemoSim(start = {}) {
 
         if (s.phase === 'idle') {
           shifts = [{ techId, date: today, start: iso(s.clock), end: null }, ...shifts];
-          if (jobId) setJob(jobId, { status: 'en_route', enRouteAt: iso(s.clock) });
+          if (jobId) { setJob(jobId, { status: 'en_route', enRouteAt: iso(s.clock) }); headsUp(jobId, s.clock); }
           setTech(techId, { status: 'en_route' });
           return { ...s, phase: 'driving' };
         }
@@ -636,6 +650,16 @@ export function useDemoSim(start = {}) {
           // Geofence: close enough to the lawn → start cutting.
           if (metersBetween(p, [target.lat, target.lng]) <= GEOFENCE_M || meters >= leg.length) {
             pos[t] = { lat: target.lat, lng: target.lng };
+            const skipReason = plow ? null : skipFor(jobId);
+            if (skipReason) {
+              // Skipped: not cut, not billed; straight on to the next lawn.
+              const at0 = s.clock + leg.seconds * 1000;
+              setJob(jobId, { status: 'skipped', skippedAt: iso(at0), skipReason });
+              lastEvent = `⏭ ${name} skipped ${target.name} · ${skipReason.toLowerCase()}`;
+              const after = route.legs[s.leg + 1]?.to;
+              if (after && after !== 'depot') { setJob(`${after}@${today}`, { status: 'en_route', enRouteAt: iso(at0) }); headsUp(`${after}@${today}`, at0); }
+              return { ...s, leg: s.leg + 1, meters: 0, phase: 'driving', cutLeft: 0, clock: at0 };
+            }
             setTech(techId, { status: 'busy' });
             setJob(jobId, { status: 'in_progress' });
             return { ...s, meters, phase: 'cutting', cutLeft: CUT_SECONDS };
@@ -652,7 +676,7 @@ export function useDemoSim(start = {}) {
         newBursts.push({ id: `${jobId}-${Date.now()}`, lat: target.lat, lng: target.lng, text: `${plow ? '❄️ ' : ''}+$${target.price}`, at: Date.now() });
         lastEvent = `${plow ? '❄️ ' : ''}+$${target.price} · ${target.name}`;
         const nextStop = route.legs[s.leg + 1]?.to;
-        if (nextStop && nextStop !== 'depot') setJob(`${nextStop}@${today}`, { status: 'en_route', enRouteAt: iso(finished) });
+        if (nextStop && nextStop !== 'depot') { setJob(`${nextStop}@${today}`, { status: 'en_route', enRouteAt: iso(finished) }); headsUp(`${nextStop}@${today}`, finished); }
         setTech(techId, { status: 'en_route' });
         return { ...s, leg: s.leg + 1, meters: 0, phase: 'driving', cutLeft: 0, clock: finished };
       });
@@ -812,7 +836,7 @@ export function useDemoSim(start = {}) {
     const lawn = {
       id, name: job.clientName, address: job.address, lat: job.location.lat, lng: job.location.lng,
       price: plan.price || job.earnings || 0, day: wd, truck: t,
-      quote: job.quote, notes: job.notes, requested: job.requested,
+      quote: job.quote, notes: job.notes, requested: job.requested, notifyArrival: Boolean(plan.notifyArrival),
     };
     const extraLawns = { ...(w.extraLawns || {}), [id]: lawn };
     const index = plan.slot && plan.slot.day === wd && plan.slot.techId === FOREMEN[t].id
@@ -823,7 +847,9 @@ export function useDemoSim(start = {}) {
     const custom = { ...(w.custom || {}), [key]: [...((w.custom || {})[key] || []), { from: date, route }] };
     const next = {
       ...w, custom, extraLawns,
-      jobs: w.jobs.filter(j => j.id !== jobId),
+      // The quote becomes their first scheduled cut (like the server does), so they're a
+      // customer right away: card, Lawns list, next visit.
+      jobs: [...w.jobs.filter(j => j.id !== jobId), { ...baseJob(lawn), id: `${id}@${date}`, status: 'assigned', scheduledDate: date, createdAt: demoNow() }],
       lastEvent: `✓ ${job.clientName} added · ${DAY_SHORT[wd]} · ${FOREMEN[t].truckName}`,
     };
     commitWorld(next);

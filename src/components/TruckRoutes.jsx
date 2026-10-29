@@ -11,9 +11,10 @@ const mins = j => (j.startedAt && j.completedAt ? (new Date(j.completedAt) - new
 function routeFor(tech, jobs, today, shifts, delays) {
   const stops = jobs.filter(j => j.assignedTo === tech.id && jobDay(j, today) === today && !['quote', 'declined'].includes(j.status));
   const done = stops.filter(j => j.status === 'completed');
+  const skipped = stops.filter(j => j.status === 'skipped'); // not cut, not billed, not "left"
   const timed = done.map(mins).filter(m => m != null && m >= 3 && m < 600);
   const current = stops.find(j => j.status === 'in_progress') || stops.find(j => j.status === 'en_route');
-  const upNext = stops.filter(j => j.status !== 'completed' && j !== current).slice(0, 3);
+  const upNext = stops.filter(j => !['completed', 'skipped'].includes(j.status) && j !== current).slice(0, 3);
   const shift = dayShift(tech.id, today, jobs, shifts);
   return {
     start: shift.start,
@@ -21,9 +22,10 @@ function routeFor(tech, jobs, today, shifts, delays) {
     rain: rainMinutes(delays, tech.id, today, today),
     stops,
     done: done.length,
-    left: stops.length - done.length,
+    left: stops.length - done.length - skipped.length,
+    skipped: skipped.length,
     billed: done.reduce((s, j) => s + (j.earnings || 0), 0),
-    toBill: stops.filter(j => j.status !== 'completed').reduce((s, j) => s + (j.earnings || 0), 0),
+    toBill: stops.filter(j => !['completed', 'skipped'].includes(j.status)).reduce((s, j) => s + (j.earnings || 0), 0),
     avg: timed.length ? Math.round(timed.reduce((s, m) => s + m, 0) / timed.length) : null,
     cutting: Math.round(timed.reduce((s, m) => s + m, 0)),
     current,
@@ -79,7 +81,8 @@ function TruckCard({ tech, route, selected, onSelect }) {
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px', marginTop: '5px' }} aria-label={`${route.done} of ${route.stops.length} stops done`}>
           {route.stops.map(j => (
-            <span key={j.id} title={`${street(j.address)} · ${j.clientName}`} style={{ width: '9px', height: '9px', borderRadius: '50%', background: STOP_COLORS[j.status] || 'var(--border)', outline: j === now ? '2px solid #fff' : 'none' }} />
+            <span key={j.id} title={`${street(j.address)} · ${j.clientName}${j.status === 'skipped' ? ` · skipped (${j.skipReason || 'no reason'})` : ''}`}
+              style={{ width: '9px', height: '9px', borderRadius: '50%', background: STOP_COLORS[j.status] || 'var(--border)', outline: j === now ? '2px solid #fff' : 'none', ...(j.status === 'skipped' ? { background: 'transparent', boxShadow: 'inset 0 0 0 2px #8b949e' } : {}) }} />
           ))}
         </div>
       </div>
@@ -102,6 +105,7 @@ function TruckCard({ tech, route, selected, onSelect }) {
         <div style={{ color: 'var(--text-muted)' }}>
           ⏱ {hoursMins(route.cutting)} {plow ? 'plowing' : 'cutting'} · {money(route.toBill)} still to {plow ? 'plow' : 'cut'}
           {route.rain > 0 && <span style={{ color: '#58a6ff', fontWeight: 600 }}> · 🌧 {hoursMins(route.rain)} rain delay</span>}
+          {route.skipped > 0 && <span> · ⏭ {route.skipped} skipped</span>}
         </div>
       </div>
     </button>

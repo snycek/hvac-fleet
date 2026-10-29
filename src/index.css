@@ -854,3 +854,8 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .tour-skip { margin-right: auto; background: none; border: none; color: #6b7280; font: inherit; font-size: 12.5px; cursor: pointer; padding: 4px 0; }
 .tour-back { padding: 6px 12px; font-size: 13px; color: #1b1f24; border-color: #d0d5dd; }
 .tour-next { padding: 7px 16px; font-size: 13px; }
+.tour-bubble.pinned { box-shadow: 0 14px 40px #000c, 0 0 0 2px #f0b429; }
+
+/* Add Customer: "Text before arrival" + the exact message */
+.notify-arrival { display: flex; flex-direction: column; gap: 8px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.notify-preview { font-size: 12.5px; line-height: 1.45; color: var(--text-primary); background: #1f6feb18; border-left: 3px solid #58a6ff; border-radius: 6px; padding: 8px 10px; }

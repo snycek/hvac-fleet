@@ -13,6 +13,14 @@ function ActivityFeed({ jobs, expenses, technicians, delays = [], shifts = [], p
     const first = id => technicians.find(t => t.id === id)?.name.split(' ')[0] || 'Crew';
     const out = [];
     for (const j of jobs) {
+      for (const r of j.reminders || []) {
+        if (r.kind === 'heads_up' && dayOf(r.at) === today) {
+          out.push({ key: `h-${r.id}`, at: r.at, icon: '📲', text: <>On-the-way {r.channel === 'email' ? 'email' : 'text'} to <b>{String(j.clientName || '').split(' ')[0]}</b> · {street(j.address)}</>, amount: '', tone: 'note' });
+        }
+      }
+      if (j.status === 'skipped' && j.skippedAt && jobDay(j, today) === today) {
+        out.push({ key: `s-${j.id}`, at: j.skippedAt, icon: '⏭', text: <><b>{first(j.assignedTo)}</b> skipped {street(j.address)}{j.skipReason ? <span style={{ color: 'var(--text-muted)' }}> · {j.skipReason}</span> : null}</>, amount: '', tone: 'skip' });
+      }
       if (j.status === 'completed' && j.completedAt && jobDay(j, today) === today) {
         const plowed = j.service === 'Snow Removal';
         out.push({ key: `c-${j.id}`, at: j.completedAt, icon: plowed ? '❄️' : '✂️', text: <><b>{first(j.assignedTo)}</b> {plowed ? 'plowed' : 'cut'} {plowed ? j.clientName : street(j.address)}</>, amount: money(j.earnings || 0), tone: 'cut' });

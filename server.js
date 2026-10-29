@@ -12,6 +12,8 @@ import { suggestAddresses } from './src/lib/addressSuggest.js';
 import { applyPaymentResult, crewCollect, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from './src/lib/payments.js';
 import { BILLING_DEFAULTS, accountFor, billingSettings, invoiceFor } from './src/lib/invoices.js';
 import { lawnKey } from './src/lib/lawns.js';
+import { headsUpRecord, isHeadsUp, wantsHeadsUp } from './src/lib/notify.js';
+import { COMPANY_INFO } from './src/data/services.js';
 import crypto from 'crypto';
 import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
 
@@ -418,8 +420,14 @@ app.put('/api/jobs/:id/status', (req, res) => {
 
   const currentJob = jobs[idx];
   const stamp = new Date().toISOString();
+  // Skip: the crew didn't cut it this time (customer asked, gate locked, …). Not billed,
+  // never late; the next visit still schedules itself.
+  const skip = status === 'skipped'
+    ? { skippedAt: stamp, skipReason: String(req.body?.reason || 'Skipped').slice(0, 80), skippedBy: req.user?.id || null }
+    : {};
   const updatedJob = {
     ...currentJob,
+    ...skip,
     status,
     completedAt: status === 'completed' ? stamp : currentJob.completedAt || null,
     // Timing for "average minutes to cut".
@@ -427,11 +435,24 @@ app.put('/api/jobs/:id/status', (req, res) => {
     ...(status === 'in_progress' && !currentJob.startedAt ? { startedAt: stamp } : {}),
   };
   jobs[idx] = updatedJob;
+  // "Crew on the way": customers who asked get a text/email as the crew heads over.
+  // (Logged in their contact history; texting/email isn't connected yet.)
+  if (status === 'en_route' && currentJob.status !== 'en_route' && wantsHeadsUp(updatedJob)) {
+    const rec = headsUpRecord(updatedJob, COMPANY_INFO.name, stamp);
+    if (rec) {
+      jobs[idx] = { ...updatedJob, reminders: [...(updatedJob.reminders || []), rec] };
+      console.log(`[ON THE WAY] ${rec.channel} → ${updatedJob.clientName} ${rec.to}: ${rec.message}`);
+    }
+  }
 
   let nextJob = null;
-  if (status === 'completed' && currentJob.status !== 'completed' && updatedJob.repeatDays > 0) {
+  const finished = s => s === 'completed' || s === 'skipped';
+  if (finished(status) && !finished(currentJob.status) && updatedJob.repeatDays > 0) {
+    // The next visit copies the customer + schedule, never this visit's own history
+    // (reminders, a check on the way, payment problems, skip notes).
+    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, ...carry } = updatedJob;
     nextJob = {
-      ...updatedJob,
+      ...carry,
       id: createJobId(),
       status: updatedJob.assignedTo ? 'assigned' : 'pending',
       scheduledDate: addDays(updatedJob.scheduledDate || todayString(), updatedJob.repeatDays),
@@ -450,7 +471,9 @@ app.put('/api/jobs/:id/status', (req, res) => {
     const techIdx = technicians.findIndex((t) => t.id === updatedJob.assignedTo);
     if (techIdx >= 0) {
       const tech = technicians[techIdx];
-      if (status === 'completed') {
+      if (status === 'skipped') {
+        technicians[techIdx] = { ...tech, currentJobId: null, status: 'available' };
+      } else if (status === 'completed') {
         technicians[techIdx] = {
           ...tech,
           currentJobId: null,
@@ -467,7 +490,7 @@ app.put('/api/jobs/:id/status', (req, res) => {
       }
     }
   }
-  return res.json(nextJob ? { ...updatedJob, nextJob } : updatedJob);
+  return res.json(nextJob ? { ...jobs[idx], nextJob } : jobs[idx]);
 });
 
 // Owner accepts a quote: set price, first cut day, how often, and the foreman.
@@ -495,6 +518,7 @@ app.put('/api/jobs/:id/schedule', (req, res) => {
     repeatDays: repeat,
     // Snow customers get pushed every snowfall (dispatched when it snows), not on a repeat.
     perSnowfall: req.body.perSnowfall === true,
+    notifyArrival: req.body.notifyArrival === true, // text/email when the crew heads over
     earnings: amount,
     acceptedAt: new Date().toISOString(),
   };
@@ -602,7 +626,7 @@ app.post('/api/payments/charge', (req, res) => {
 const REMIND_EVERY_MS = 7 * 24 * 3600 * 1000;
 function lastReminderAt(key) {
   let last = '';
-  for (const j of jobs) if (lawnKey(j) === key) for (const r of j.reminders || []) if (String(r.at) > last) last = String(r.at);
+  for (const j of jobs) if (lawnKey(j) === key) for (const r of j.reminders || []) if (!isHeadsUp(r) && String(r.at) > last) last = String(r.at);
   return last || null;
 }
 const remindedThisWeek = (key) => { const last = lastReminderAt(key); return last && Date.now() - new Date(last).getTime() < REMIND_EVERY_MS ? last : null; };
@@ -1019,6 +1043,7 @@ app.put('/api/customers', (req, res) => {
   const patch = {};
   if (['text', 'email', 'paper'].includes(req.body?.contactPref)) patch.contactPref = req.body.contactPref;
   if (['monthly', 'visit'].includes(req.body?.billing)) patch.billing = req.body.billing;
+  if (typeof req.body?.notifyArrival === 'boolean') patch.notifyArrival = req.body.notifyArrival;
   if (!key || !Object.keys(patch).length) return res.status(400).json({ error: 'nothing to change' });
   let n = 0;
   jobs.forEach((j, i) => { if (lawnKey(j) === key) { jobs[i] = { ...j, ...patch }; n += 1; } });

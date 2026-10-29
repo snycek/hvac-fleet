@@ -57,14 +57,15 @@ export function useJobs({ live = true } = {}) {
     };
   }, [live]);
 
-  const updateJobStatus2 = useCallback(async (jobId, status) => {
+  // extra: e.g. { reason } when skipping a lawn.
+  const updateJobStatus2 = useCallback(async (jobId, status, extra = {}) => {
     if (!FIREBASE_ENABLED) {
       const completionPayload = status === 'completed' ? { completedAt: new Date().toISOString() } : {};
       try {
         const res = await fetch(`/api/jobs/${jobId}/status`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status, ...completionPayload }),
+          body: JSON.stringify({ status, ...completionPayload, ...extra }),
         });
 
         if (!res.ok) {

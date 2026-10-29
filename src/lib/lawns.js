@@ -21,7 +21,7 @@ export function lawnStats(jobs, key) {
   const timed = cuts.filter(j => j.startedAt && j.completedAt)
     .map(j => minutesBetween(j.startedAt, j.completedAt))
     .filter(m => m >= 3 && m < 600);
-  const upcoming = all.filter(j => j.status !== 'completed').map(j => j.scheduledDate || todayString()).sort();
+  const upcoming = all.filter(j => !['completed', 'skipped'].includes(j.status)).map(j => j.scheduledDate || todayString()).sort();
   const latest = all.slice().sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] || {};
   const withNotes = all.find(j => customerNotes(j));
   return {

@@ -115,7 +115,17 @@ export default function OwnerView({ demoOnly = false } = {}) {
   const [phoneDemo, setPhoneDemo] = useState(false);       // demo controls opened up
   const [phoneActivity, setPhoneActivity] = useState(false);
   const [tourOpen, setTourOpen] = useState(() => demoOnly && !tourSeen());
-  const closeTour = () => { setTourOpen(false); try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* private mode */ } };
+  const tourQuote = useRef(null); // the quote the walkthrough approves, to open its card after
+  // Ending the tour puts the hub back the way it started (and remembers it was seen).
+  const closeTour = () => {
+    setTourOpen(false);
+    try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* private mode */ }
+    setPrinting(null);
+    setCustomerKey(null);
+    [...document.querySelectorAll('form.card button')].find(b => b.innerText.trim() === 'Cancel')?.click();
+    [...document.querySelectorAll('.print-root .print-toolbar button')].find(b => b.innerText.trim() === 'Close')?.click();
+    if (isPhone) setPhoneTab('today'); else { setView('hub'); setLeftTab('todo'); }
+  };
   const [view, setView] = useState('hub'); // 'hub' | 'payroll'
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [printing, setPrinting] = useState(null); // { title, items } for the invoice preview
@@ -414,15 +424,74 @@ export default function OwnerView({ demoOnly = false } = {}) {
         {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
       </div>
   );
+  // Walkthrough steps. Some open what they talk about first (before) and the payroll
+  // step runs payroll when you tap its button (after). The demo only: no real data.
+  const clickEl = sel => document.querySelector(sel)?.click();
+  const closeStub = () => [...document.querySelectorAll('.print-root .print-toolbar button')].find(b => b.innerText.trim() === 'Close')?.click();
+  const cancelQuoteForm = () => [...document.querySelectorAll('form.card button')].find(b => b.innerText.trim() === 'Cancel')?.click();
+  const showHub = () => { setPrinting(null); closeStub(); cancelQuoteForm(); setCustomerKey(null); if (isPhone) setPhoneTab('today'); else { setView('hub'); setLeftTab('todo'); } };
+  const openQuoteForm = () => { if (!document.querySelector('form.card .fit, .quote-approve')) clickEl('.quote-add'); };
+  const showQuotes = () => {
+    showHub();
+    if (isPhone) setPhoneTab('todo');
+    else { setLeftTab('quotes'); if (collapsed.todo) toggle('todo'); }
+  };
+  const showStatement = () => {
+    showHub();
+    const list = statementsFor(allJobs, latestPeriod, today, settings, { assumeSentBefore });
+    const pick = list.find(st => st.previousTotal > 0 && st.open > 0) || list.find(st => st.open > 0) || list[0];
+    if (pick) printStatements([pick]);
+  };
+  const showPayroll = () => { setPrinting(null); closeStub(); if (isPhone) setPhoneTab('crew'); else setView('payroll'); };
+  const runPayroll = () => {
+    const keep = window.confirm;
+    window.confirm = () => true; // the demo's "Mark all paid" asks first; the tour already asked
+    try { clickEl('.pay-mark-all'); } finally { window.confirm = keep; }
+  };
+  const showStub = () => {
+    showPayroll();
+    setTimeout(() => {
+      const toggleBtn = document.querySelector('.pay-toggle');
+      if (toggleBtn && toggleBtn.getAttribute('aria-expanded') !== 'true') toggleBtn.click();
+      setTimeout(() => {
+        const row = [...document.querySelectorAll('.pay-history tbody tr')].find(r => /#\d/.test(r.innerText)) || document.querySelector('.pay-history tbody tr');
+        row?.querySelector('.pay-stub-btn')?.click();
+      }, 200);
+    }, 200);
+  };
   const tourSteps = [
-    { targets: ['.phone-demo-pill', '.demo-bar'], title: '🎬 This is a live demo',
+    { targets: ['.phone-demo-pill', '.demo-bar'], title: '🎬 This is a live demo', before: showHub,
       text: `It's playing at ${sim.speed}× speed with ${sim.truckCount} truck${sim.truckCount === 1 ? '' : 's'}, on made-up customers in Allen Park. ${isPhone ? 'Tap here' : 'Use these controls'} to change the speed, add trucks, pause, or jump to winter.` },
-    { targets: ['.phone-tabs button:nth-child(2)', '.dash-col .dash-panel .dash-tabs'], title: "📥 John's To-Do",
+    { targets: ['.phone-tabs button:nth-child(2)', '.dash-col .dash-panel .dash-tabs'], title: "📥 John's To-Do", before: showHub,
       text: 'Everything that needs him: checks to clear, past-due accounts, statements to send, and new quote requests.' },
-    { targets: ['.phone-map', '.dash-map'], title: '🗺️ Live map',
-      text: "Trucks move as the crews work. Tap any lawn to open that customer's card." },
-    { targets: ['.phone-tabs button:nth-child(4)', '.cust-search input'], title: '🔍 Find any customer',
+    { targets: ['.quote-yard'], title: '📝 Quotes arrive already measured',
+      before: () => { showQuotes(); const q = allJobs.find(j => j.status === 'quote'); tourQuote.current = q ? lawnKey(q) : null; },
+      text: "The customer outlined their yard on a satellite map when they asked for a quote. That outline is the geofence: the crew's GPS uses it to know they're at the right lawn. The price comes from the square footage." },
+    { targets: ['form.card .fit'], title: '⭐ It suggests the best route', before: openQuoteForm,
+      text: "Tapping Add Customer checks every truck's route for the week and suggests the day and stop that adds the least driving. John can change the price, the day, or the truck before approving." },
+    { targets: ['form.card .notify-arrival'], title: '📲 Text before arrival',
+      before: () => { openQuoteForm(); setTimeout(() => { const cb = document.querySelector('form.card .notify-arrival input'); if (cb && !cb.checked && !cb.disabled) cb.click(); }, 300); },
+      text: 'Tick this and the customer gets a heads-up the moment the crew finishes the lawn before theirs, by text or email, whichever they prefer. This is exactly what they get.' },
+    { targets: ['.quote-approve'], title: '✅ Approve it', before: openQuoteForm, after: () => clickEl('.quote-approve'), nextLabel: 'Approve →',
+      text: 'One tap approves the quote and puts the first cut on that route. After every cut, the next one schedules itself.' },
+    { targets: ['aside.cust-card'], title: "📇 Now they're a customer",
+      before: () => {
+        showHub();
+        if (tourQuote.current) setCustomerKey(tourQuote.current);
+        // open their Property tab so the yard outline shows
+        setTimeout(() => [...document.querySelectorAll('aside.cust-card .cust-tabs button')].find(b => b.innerText.includes('Property'))?.click(), 250);
+      },
+      text: 'Their card has the yard outline, price and schedule. Every visit, payment and message will collect here from now on.' },
+    { targets: ['.phone-map', '.dash-map'], title: '🗺️ Live map', before: showHub,
+      text: "Trucks move as the crews work. Tap any lawn to open that customer's card, or a truck to see its day." },
+    { targets: ['.phone-tabs button:nth-child(4)', '.cust-search input'], title: '🔍 Find any customer', before: showHub,
       text: 'Search by address, name or phone to see their visits, payments, and yard outline.' },
+    { targets: ['.print-root .invoice-sheet'], title: "💵 A customer's monthly bill", before: showStatement,
+      text: 'On the 1st, every customer gets one statement: each visit that month, any earlier balance, and a QR code to pay from their phone. It goes by text, email, or paper, whichever they prefer.' },
+    { targets: ['.pay-mark-all'], title: '👷 Running payroll', before: showPayroll, after: runPayroll, nextLabel: 'Run payroll →',
+      text: "Hours come straight from each truck's day (rollout to back at the shop). Each Friday, one tap on Mark all paid runs the week's payroll. Tap below to run it now." },
+    { targets: ['.print-root .stub-sheet'], title: '🧾 Every paycheck has a stub', before: showStub,
+      text: "Each person has a full pay history. A stub shows hours by day, rate, overtime, gross pay, year-to-date, and the check number." },
   ];
   const overlaysEl = (
     <>
@@ -453,6 +522,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
       key={demoOn ? 'demo' : 'live'}
       technicians={mapTechs}
       jobs={jobs}
+      today={today}
       selectedTechId={selectedTechId}
       {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
       onPickCustomer={key => setCustomerKey(key)}
@@ -677,6 +747,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
                   key={demoOn ? 'demo' : 'live'}
                   technicians={mapTechs}
                   jobs={jobs}
+                  today={today}
                   selectedTechId={selectedTechId}
                   {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
                   onPickCustomer={key => setCustomerKey(key)}

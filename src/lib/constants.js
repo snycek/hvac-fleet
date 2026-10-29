@@ -5,6 +5,7 @@ export const JOB_STATUS = {
   en_route:    { label: 'En Route',    color: '#9c55f7' },
   in_progress: { label: 'In Progress', color: '#e67e22' },
   completed:   { label: 'Cut',         color: '#3fb950' },
+  skipped:     { label: 'Skipped',     color: '#8b949e' },
   declined:    { label: 'Declined',    color: '#8b949e' },
 };
 

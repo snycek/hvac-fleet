@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { customerHistory, methodLabel, nextReminderDate } from '../lib/customers.js';
 import { CONTACT_METHODS } from '../lib/billing.js';
+import { lastPaymentContact } from '../lib/notify.js';
 import { METHODS } from '../lib/payments.js';
 import { formatPrice, formatSqFt } from '../lib/zones.js';
 import { repeatLabel } from '../lib/dates.js';
@@ -11,7 +12,7 @@ const usd = n => `$${Number(n || 0).toFixed(2)}`;
 const day = iso => (iso ? new Date(String(iso).length === 10 ? `${iso}T12:00:00` : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 const stamp = iso => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
 const CHANNEL = { text: '💬 Text', email: '✉️ Email', paper: '📄 Paper' };
-const contactKind = c => (c.kind === 'statement' ? `${c.periodLabel || 'monthly'} statement`
+const contactKind = c => (c.kind === 'heads_up' ? 'on-the-way text (automatic)' : c.kind === 'statement' ? `${c.periodLabel || 'monthly'} statement`
   : c.scope === 'account' ? `account reminder (${c.jobIds.length} visit${c.jobIds.length === 1 ? '' : 's'})` : 'payment reminder');
 
 /**
@@ -87,6 +88,10 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
               <button type="button" aria-pressed={h.billing === 'monthly'} disabled={saving} onClick={() => update({ billing: 'monthly' })} title="One statement a month covering every visit">Monthly</button>
               <button type="button" aria-pressed={h.billing === 'visit'} disabled={saving} onClick={() => update({ billing: 'visit' })} title="An invoice after each visit">Each visit</button>
             </span>
+            <span className="seg-mini" role="group" aria-label="Text before arrival">
+              <button type="button" aria-pressed={h.notifyArrival} disabled={saving} onClick={() => update({ notifyArrival: !h.notifyArrival })}
+                title="Text or email them when the crew heads to their lawn">📲 On-the-way text: {h.notifyArrival ? 'On' : 'Off'}</button>
+            </span>
             {((h.contactPref === 'text' && !h.phone) || (h.contactPref === 'email' && !h.email)) && (
               <span className="cust-warn">No {h.contactPref === 'text' ? 'phone' : 'email'} on file, so we'll use what we have</span>
             )}
@@ -95,7 +100,7 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
 
         <div className="cust-actions">
           {h.balance > 0 && onRemind && (() => {
-            const wait = nextReminderDate(h.contacts[0], today);
+            const wait = nextReminderDate(lastPaymentContact(h.contacts), today);
             return <button type="button" className="btn-ghost" disabled={busy || !!wait} onClick={remind} title={wait ? 'One reminder per week' : 'Send one reminder for the whole balance'}>🔔 {busy ? 'Sending…' : wait ? `Next reminder ${new Date(`${wait}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : 'Remind'}</button>;
           })()}
           {h.balance > 0 && onPrint && <button type="button" className="btn-ghost" onClick={() => onPrint(h)}>🖨 Print {h.billing === 'monthly' ? 'statement' : 'invoice'}</button>}
@@ -187,6 +192,7 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
                         ? <span className="cust-bad">⚠️ {v.late}d past due</span>
                         : <span className="cust-warn">Open · due {day(v.due)}</span>)}
                       {v.status === 'upcoming' && <span className="cust-dim">Scheduled</span>}
+                      {v.status === 'skipped' && <span className="cust-dim">⏭ Skipped{v.skipReason ? ` · ${v.skipReason}` : ''} · no charge</span>}
                     </td>
                   </tr>
                 ))}

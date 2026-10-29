@@ -12,6 +12,33 @@ import { usePayroll } from '../hooks/usePayroll.js';
 import { useShifts } from '../hooks/useShifts.js';
 import { lawnKey } from '../lib/lawns.js';
 
+// Skip this lawn today: pick why, then it's off the route (not billed, not late). The
+// next visit still schedules itself.
+const SKIP_REASONS = ['Customer asked', 'Gate locked / no access', 'Too wet / weather', 'Other'];
+function SkipButton({ onSkip, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const stop = e => e.stopPropagation();
+  if (!open) {
+    return (
+      <button type="button" className="btn-ghost" disabled={disabled} onClick={e => { stop(e); setOpen(true); }}
+        style={{ padding: '12px 14px', fontSize: '15px', flex: '0 1 auto', color: 'var(--text-muted)' }}>⏭ Skip</button>
+    );
+  }
+  const pick = async (e, reason) => { stop(e); setBusy(true); try { await onSkip(reason); } finally { setBusy(false); setOpen(false); } };
+  return (
+    <div onClick={stop} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Skip this lawn today because…</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        {SKIP_REASONS.map(r => (
+          <button key={r} type="button" className="btn-ghost" disabled={busy} onClick={e => pick(e, r)} style={{ padding: '11px 8px', fontSize: '14px', fontWeight: 600 }}>{r}</button>
+        ))}
+      </div>
+      <button type="button" className="btn-ghost" onClick={e => { stop(e); setOpen(false); }} style={{ padding: '8px', fontSize: '13px' }}>Cancel, don't skip</button>
+    </div>
+  );
+}
+
 // Customer paid at the door: check (number optional) or cash. Covers their whole
 // unpaid balance; the owner clears it when the foreman turns it in.
 function GotPaid({ amount, onSave }) {
@@ -98,15 +125,17 @@ export default function TechnicianView() {
 
   const mine = jobs.filter(j => j.assignedTo === activeTechId);
   const open = mine
-    .filter(j => !['completed', 'declined', 'quote'].includes(j.status))
+    .filter(j => !['completed', 'skipped', 'declined', 'quote'].includes(j.status))
     .sort((a, b) => dayOf(a).localeCompare(dayOf(b)));
   const groups = [
     { key: 'overdue',  title: 'Overdue',  color: '#ff7b72', jobs: open.filter(j => dayOf(j) < today) },
     { key: 'today',    title: 'Today',    color: 'var(--accent-teal)', jobs: open.filter(j => dayOf(j) === today) },
     { key: 'upcoming', title: 'Upcoming', color: 'var(--text-muted)', jobs: open.filter(j => dayOf(j) > today) },
   ];
-  const done = mine.filter(j => j.status === 'completed').sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)));
-  const doneToday = done.filter(j => j.completedAt && todayString(new Date(j.completedAt)) === today);
+  // Finished stops: cut, or skipped (shown with their reason).
+  const done = mine.filter(j => j.status === 'completed' || j.status === 'skipped')
+    .sort((a, b) => String(b.completedAt || b.skippedAt).localeCompare(String(a.completedAt || a.skippedAt)));
+  const doneToday = done.filter(j => j.status === 'completed' && j.completedAt && todayString(new Date(j.completedAt)) === today);
   const earnedToday = doneToday.reduce((sum, j) => sum + (j.earnings || 0), 0);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(''), 5000); };
@@ -161,6 +190,20 @@ export default function TechnicianView() {
     flash(next
       ? `${job.clientName} marked cut. On my way to ${String(next.address || '').split(',')[0]}.${repeat}`
       : `${job.clientName} marked cut — that's the last one today.${repeat}`);
+  };
+
+  const handleSkip = async (job, reason) => {
+    setLoadingId(job.id);
+    const result = await updateJobStatus2(job.id, 'skipped', { reason });
+    const next = open.find(j => j.id !== job.id && ['assigned', 'pending'].includes(j.status) && dayOf(j) <= today);
+    if (next) await updateJobStatus2(next.id, 'en_route');
+    setLoadingId(null);
+    const repeat = result?.nextJob ? ` Next visit ${formatDay(result.nextJob.scheduledDate)}.` : '';
+    // Another stop still open today (maybe already marked on the way)?
+    const onTo = next || open.find(j => j.id !== job.id && dayOf(j) <= today);
+    flash(onTo
+      ? `Skipped ${job.clientName} (${reason.toLowerCase()}). On to ${String(onTo.address || '').split(',')[0]}.${repeat}`
+      : `Skipped ${job.clientName} (${reason.toLowerCase()}). That was the last one today.${repeat}`);
   };
 
   const handleExpense = async (exp) => {
@@ -281,6 +324,7 @@ export default function TechnicianView() {
                           {isLoading && i === 0 ? 'Updating…' : step.label}
                         </button>
                       ))}
+                      <SkipButton disabled={isLoading || onRainDelay} onSkip={reason => handleSkip(job, reason)} />
                     </>
                   ) : null}
                 />

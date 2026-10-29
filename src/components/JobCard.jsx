@@ -26,7 +26,10 @@ export default function JobCard({ job, actions, expanded = false, onClick }) {
             </span>
             <StatusBadge label={status.label} color={status.color} />
           </div>
-          {job.scheduledDate && job.status !== 'completed' && (
+          {job.status === 'skipped' && (
+            <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: 'var(--text-muted)' }}>⏭ Skipped{job.skipReason ? ` · ${job.skipReason}` : ''}</div>
+          )}
+          {job.scheduledDate && !['completed', 'skipped'].includes(job.status) && (
             <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: relativeDay(job.scheduledDate).startsWith('Overdue') ? '#ff7b72' : 'var(--accent-teal)' }}>
               📅 {relativeDay(job.scheduledDate)}{job.repeatDays > 0 ? ` · ${repeatLabel(job.repeatDays)}` : ''}
             </div>

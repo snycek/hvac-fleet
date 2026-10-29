@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import YardMap from './YardMap.jsx';
 import { COMPANY_INFO } from '../data/services.js';
+import { addressFor, remindBy } from '../lib/billing.js';
+import { arrivalMessage } from '../lib/notify.js';
 import { formatPrice, formatSqFt } from '../lib/zones.js';
 import { REPEAT_OPTIONS, addDays, formatDay, todayString } from '../lib/dates.js';
 import { bestPerDay, fmtMiles } from '../lib/routeFit.js';
@@ -43,6 +45,9 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
   const [date, setDate] = useState(best?.date || addDays(today, 1));
   // Snow: dispatched every time it snows, not on a fixed repeat.
   const [repeatDays, setRepeatDays] = useState(requested.includes('Lawn Cutting') && !snow ? 7 : 0);
+  // Text/email them when the crew heads to their lawn (right after the stop before).
+  const [notifyArrival, setNotifyArrival] = useState(false);
+  const notifyBy = remindBy(job);
   const [techId, setTechId] = useState(best?.techId || (foremen.length === 1 ? foremen[0].id : ''));
   const pickSlot = o => { setSlotKey(o.key); setDate(o.date); setTechId(o.techId); };
   // Picking a foreman keeps the day and moves to that foreman's best spot that day.
@@ -66,6 +71,7 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
         price: Number(price) || 0,
         techId,
         service: requested.join(', ') || 'Lawn Service',
+        notifyArrival,
         ...(slot && slot.techId === techId ? { slot: { key: slot.key, day: slot.day, techId: slot.techId, index: slot.index } } : {}),
       });
     } catch (err) {
@@ -170,11 +176,23 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
           </select>
         </div>
 
+        <div className="notify-arrival">
+          <label style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', cursor: notifyBy ? 'pointer' : 'not-allowed' }}>
+            <input type="checkbox" checked={notifyArrival} disabled={!notifyBy} onChange={e => setNotifyArrival(e.target.checked)} style={{ marginTop: '3px' }} />
+            <span>
+              <b>📲 Text before arrival</b>
+              <span className="cust-dim" style={{ display: 'block', fontSize: '12px' }}>
+                {notifyBy ? `Sent by ${notifyBy} to ${addressFor(job, notifyBy)} when the crew finishes the lawn before theirs.` : 'No phone or email on file.'}
+              </span>
+            </span>
+          </label>
+          {notifyArrival && <div className="notify-preview">“{arrivalMessage({ ...job, perSnowfall: snow }, COMPANY_INFO.name)}”</div>}
+        </div>
         {state.error && <div style={{ color: '#ff7b72', fontSize: '13px' }}>{state.error}</div>}
 
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
           <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button type="submit" className="btn-primary" disabled={state.saving} style={{ padding: '10px 20px' }}>
+          <button type="submit" className="btn-primary quote-approve" disabled={state.saving} style={{ padding: '10px 20px' }}>
             {state.saving ? 'Saving…' : 'Add Customer & Schedule'}
           </button>
         </div>
@@ -224,7 +242,7 @@ function QuoteCard({ job, onAdd, onDecline, now }) {
       </div>
 
       {zones.length > 0 ? (
-        <YardMap zones={zones} readOnly height="240px" />
+        <div className="quote-yard"><YardMap zones={zones} readOnly height="240px" /></div>
       ) : (
         <div style={{ padding: '18px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>
           Customer skipped the map — call to measure.
@@ -236,7 +254,7 @@ function QuoteCard({ job, onAdd, onDecline, now }) {
         <a className="btn-ghost" href={`sms:${digits(job.clientPhone)}?&body=${smsBody}`} style={{ textDecoration: 'none', padding: '9px 14px', fontSize: '13px' }}>💬 Text</a>
         <span style={{ flex: 1 }} />
         <button type="button" className="btn-ghost" onClick={onDecline} style={{ padding: '9px 14px', fontSize: '13px', color: '#ff7b72' }}>Decline</button>
-        <button type="button" className="btn-primary" onClick={onAdd} style={{ padding: '9px 18px', fontSize: '13px' }}>✓ Add Customer</button>
+        <button type="button" className="btn-primary quote-add" onClick={onAdd} style={{ padding: '9px 18px', fontSize: '13px' }}>✓ Add Customer</button>
       </div>
     </div>
   );

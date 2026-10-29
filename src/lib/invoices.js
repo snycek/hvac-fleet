@@ -101,7 +101,7 @@ export function accountFor(jobs, anyJob, today = todayString(), settings) {
   const mine = customerJobs(jobs, anyJob);
   const lines = mine.filter(j => j.status !== 'quote' && j.status !== 'declined').map(j => invoiceLine(j, today, settings));
   const open = lines.filter(l => !l.paid && mine.find(j => j.id === l.id)?.status === 'completed').sort((a, b) => a.date.localeCompare(b.date));
-  const upcoming = lines.filter(l => !l.paid && mine.find(j => j.id === l.id)?.status !== 'completed').sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
+  const upcoming = lines.filter(l => !l.paid && !['completed', 'skipped'].includes(mine.find(j => j.id === l.id)?.status)).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 3);
   const paid = lines.filter(l => l.paid).sort((a, b) => String(b.paidAt).localeCompare(String(a.paidAt))).slice(0, 8);
   return {
     customer: { name: anyJob.clientName, address: anyJob.address },

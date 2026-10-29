@@ -21,7 +21,8 @@ const SNOW_ZONE_NAMES = ['Parking Lot', 'Driveway', 'Sidewalks', 'Loading Area',
 const EMPTY_FORM = { name: '', phone: '', email: '', address: '', city: '', zip: '' };
 
 export default function QuoteTool({ setPage, initialServiceId }) {
-  const [step, setStep] = useState('details'); // details | map | sent
+  // Address first (one field), then the yard and price, then where to send it.
+  const [step, setStep] = useState('details'); // details (address) | map | contact | sent
   const [form, setForm] = useState(EMPTY_FORM);
   const [center, setCenter] = useState(null);
   // Address chosen from the suggestions (has coordinates). Cleared if they keep typing.
@@ -29,7 +30,11 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   const [lookup, setLookup] = useState({ state: 'idle', msg: '' });
   const [zones, setZones] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [wanted, setWanted] = useState(() => WANTED_SERVICES.filter(s => s.id === initialServiceId).map(s => s.name));
+  // Lawn Cutting is picked to start (most quotes), unless they came from another service page.
+  const [wanted, setWanted] = useState(() => {
+    const from = WANTED_SERVICES.filter(s => s.id === initialServiceId).map(s => s.name);
+    return from.length ? from : ['Lawn Cutting'];
+  });
   const [showWantedError, setShowWantedError] = useState(false);
   const [notes, setNotes] = useState('');
   const [submit, setSubmit] = useState({ state: 'idle', msg: '' });
@@ -48,7 +53,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   };
   const advance = async () => {
     if (!wanted.length) { setShowWantedError(true); return; }
-    if (!form.name || !form.phone || !form.address) return;
+    if (!form.address) return;
     setLookup({ state: 'loading', msg: '' });
     // Exact house from the suggestions: no need to look it up again.
     let found = picked?.exact ? { lat: picked.lat, lng: picked.lng } : await geocode(`${fullAddress}${form.city ? '' : ', Michigan'}`);
@@ -76,6 +81,8 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   // land on the map like hand-drawn zones, so the customer can drag corners or delete them.
   const [outline, setOutline] = useState({ state: 'idle', msg: '' });
   const [outlineOn, setOutlineOn] = useState(false); // server has it set up
+  const [fitSignal, setFitSignal] = useState(0); // bump → the map zooms to show all zones
+  const fitMove = useRef(false);
   useEffect(() => {
     let off = false;
     fetch('/api/yard-outline').then(r => (r.ok ? r.json() : null)).then(d => { if (!off) setOutlineOn(Boolean(d?.ready)); }).catch(() => {});
@@ -113,6 +120,10 @@ export default function QuoteTool({ setPage, initialServiceId }) {
         return auto;
       });
       setSelectedId(null);
+      // Zoom out to show everything it outlined. That zoom isn't the customer moving the map.
+      fitMove.current = true;
+      setTimeout(() => { fitMove.current = false; }, 1500); // in case the map didn't need to move
+      setFitSignal(n => n + 1);
       setOutline({ state: 'done', tapped, msg: data.note || 'Outlined your lawn. Tap a zone to drag its corners.' });
     } catch (err) {
       if (run === runId.current) setOutline({ state: 'error', msg: err.message });
@@ -131,20 +142,13 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, outlineOn, snow, center?.lat, center?.lng]);
 
-  // As soon as they pick their address from the suggestions: start finding the house and
-  // outlining in the background (while they finish the form). If the rest of the form is
-  // already filled in, go straight to the map, no click needed.
+  // Picking their address from the suggestions goes straight to the map: no button.
   const earlyHouse = useRef(null); // { from: 'lat,lng' of the picked address, lat, lng } once the roof is found
   useEffect(() => {
-    if (!picked?.exact || !Number.isFinite(picked.lat)) return;
-    if (form.name && form.phone && wanted.length) { advance(); return; }
-    if (!outlineOn || snow) return;
-    const at = `${picked.lat},${picked.lng}`;
-    if (autoRan.current === at) return;
-    autoRan.current = at;
-    autoOutline({ lat: picked.lat, lng: picked.lng }, { tapped: false, from: at });
+    if (!picked?.exact || !Number.isFinite(picked.lat) || !wanted.length) return;
+    advance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picked?.lat, picked?.lng, outlineOn]);
+  }, [picked?.lat, picked?.lng]);
 
   // Moving the map: when it stops (~2 s) with the ✛ somewhere new (15 m+ from the last
   // outline), outline the house under the ✛. Their own hand-drawn zones are never replaced.
@@ -155,6 +159,8 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   const moveTimer = useRef(null);
   const metersApart = (a, b) => Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180));
   const onMapMoved = c => {
+    // Our own zoom-to-fit: not the customer moving the map (and the ✛ isn't on the roof now).
+    if (fitMove.current) { fitMove.current = false; return; }
     lastMapCenter.current = { lat: c.lat, lng: c.lng };
     clearTimeout(moveTimer.current);
     if (!outlineOn || snow || outline.state === 'busy' || c.zoom < 18) return;
@@ -176,7 +182,9 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     setWanted(w => (w.includes(s) ? w.filter(x => x !== s) : [...w, s]));
   };
 
-  const sendQuote = async () => {
+  const sendQuote = async e => {
+    e?.preventDefault();
+    if (!form.name.trim() || !form.phone.trim()) { setSubmit({ state: 'error', msg: 'Add your name and phone so John can reach you.' }); return; }
     setSubmit({ state: 'loading', msg: '' });
     const measured = zones.length > 0;
     const zoneSummary = zones.map(z => `${z.name}: ${formatSqFt(areaSqFt(z.points))}`).join('; ');
@@ -239,53 +247,74 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     );
   }
 
+  if (step === 'contact') {
+    const measured = zones.length > 0;
+    return (
+      <div style={{ maxWidth: '560px' }}>
+        <button type="button" className="btn-ghost" onClick={() => setStep('map')} style={{ fontSize: '13px', padding: '6px 12px', marginBottom: '12px' }}>← Back to the map</button>
+        <h1 style={{ fontSize: '30px', fontWeight: 800, marginBottom: '6px' }}>Where should we send it?</h1>
+        <Steps current={3} />
+        <div className="card quote-summary">
+          <div>
+            <div className="quote-summary-what">{wanted.join(', ')}</div>
+            <div className="quote-summary-addr">{fullAddress}{measured ? ` · ${formatSqFt(totalSqFt)}` : ''}</div>
+          </div>
+          <div className="quote-summary-price">
+            {measured && estimate != null ? <>{formatPrice(estimate)}<small>per cut</small></> : <small>{measured ? 'John prices it' : 'John will call'}</small>}
+          </div>
+        </div>
+        <form className="card" onSubmit={sendQuote} style={{ padding: '22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '14px' }}>
+            <Field label="Your name"><input className="form-input" name="name" value={form.name} onChange={change} placeholder="John Smith" autoComplete="name" required autoFocus /></Field>
+            <Field label="Phone"><input className="form-input" type="tel" name="phone" value={form.phone} onChange={change} placeholder="(313) 555-0000" autoComplete="tel" required /></Field>
+          </div>
+          <Field label="Email (optional)"><input className="form-input" type="email" name="email" value={form.email} onChange={change} placeholder="you@example.com" autoComplete="email" /></Field>
+          <Field label="Anything John should know? (optional)">
+            <textarea className="form-input" rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Gate code, dogs, new beds, mulch…" style={{ resize: 'vertical' }} />
+          </Field>
+          {submit.state === 'error' && <div style={{ color: '#ff7b72', fontSize: '13px' }}>{submit.msg}</div>}
+          <button className="btn-primary" type="submit" disabled={submit.state === 'loading'} style={{ padding: '14px', fontSize: '16px' }}>
+            {submit.state === 'loading' ? 'Sending…' : measured && estimate != null ? `Send My Quote (${formatPrice(estimate)})` : 'Send to John'}
+          </button>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center' }}>No account, no payment. John texts or calls to confirm.</div>
+        </form>
+      </div>
+    );
+  }
+
   if (step === 'details') {
     return (
       <div style={{ maxWidth: '720px' }}>
-        <h1 style={{ fontSize: '36px', fontWeight: 800, marginBottom: '8px' }}>Request a Quote</h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '16px', lineHeight: 1.6, marginBottom: '24px' }}>
-          Tell us what you need and where. Then outline your yard or parking lot on a satellite map. Lawn prices show instantly; snow removal is priced by John.
+        <h1 style={{ fontSize: '36px', fontWeight: 800, marginBottom: '8px' }}>Get Your Price</h1>
+        <p style={{ color: 'var(--text-muted)', fontSize: '16px', lineHeight: 1.6, marginBottom: '20px' }}>
+          Enter your address. We'll find your yard on the satellite map and show your price in seconds.
         </p>
         <Steps current={1} />
-        <form className="card" onSubmit={findProperty} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <form className="card" onSubmit={findProperty} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <Field label="Your address">
+            <AddressInput
+              value={form.address}
+              onChange={v => { setForm(f => ({ ...f, address: v, city: '', zip: '' })); setPicked(null); }}
+              onPick={s => { setForm(f => ({ ...f, address: s.address, city: s.city || '', zip: s.zip || '' })); setPicked(s); }}
+              placeholder="Start typing, then pick it from the list"
+              required
+            />
+          </Field>
           <div>
-            <label className="form-label">What do you need? *</label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginTop: '6px' }}>
+            <label className="form-label">What do you need?</label>
+            <div className="quote-services">
               {WANTED_SERVICES.map(s => {
                 const on = wanted.includes(s.name);
                 return (
-                  <button key={s.id} type="button" onClick={() => toggleWanted(s.name)} aria-pressed={on} style={{
-                    display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 14px', borderRadius: '8px', cursor: 'pointer', textAlign: 'left',
-                    border: `2px solid ${on ? 'var(--accent-teal)' : 'var(--border)'}`,
-                    background: on ? 'var(--accent-teal)15' : 'var(--bg-elevated)',
-                    color: on ? 'var(--accent-teal)' : 'var(--text-primary)', fontWeight: 600, fontSize: '14px',
-                  }}>
-                    <span style={{ fontSize: '22px' }}>{s.icon}</span>
-                    <span style={{ flex: 1 }}>{s.name}</span>
-                    {on && <span>✓</span>}
+                  <button key={s.id} type="button" onClick={() => toggleWanted(s.name)} aria-pressed={on} className={`quote-service${on ? ' on' : ''}`}>
+                    <span className="quote-service-icon">{s.icon}</span>
+                    <span>{s.name}</span>
+                    {on && <span className="quote-service-check">✓</span>}
                   </button>
                 );
               })}
             </div>
             {showWantedError && <div style={{ color: '#ff7b72', fontSize: '13px', marginTop: '6px' }}>Pick at least one service.</div>}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px' }}>
-            <Field label="Full Name *"><input className="form-input" name="name" value={form.name} onChange={change} placeholder="John Smith" autoComplete="name" required /></Field>
-            <Field label="Phone *"><input className="form-input" type="tel" name="phone" value={form.phone} onChange={change} placeholder="(313) 555-0000" autoComplete="tel" required /></Field>
-          </div>
-          <Field label="Email"><input className="form-input" type="email" name="email" value={form.email} onChange={change} placeholder="john@example.com" autoComplete="email" /></Field>
-          <Field label="Property Address *">
-            <AddressInput
-              value={form.address}
-              onChange={v => { setForm(f => ({ ...f, address: v })); setPicked(null); }}
-              onPick={s => { setForm(f => ({ ...f, address: s.address, city: s.city || f.city, zip: s.zip || f.zip })); setPicked(s); }}
-              placeholder="Start typing your address…"
-              required
-            />
-          </Field>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
-            <Field label="City"><input className="form-input" name="city" value={form.city} onChange={change} placeholder="Wyandotte" autoComplete="address-level2" /></Field>
-            <Field label="ZIP Code"><input className="form-input" inputMode="numeric" name="zip" value={form.zip} onChange={change} placeholder="48192" autoComplete="postal-code" /></Field>
           </div>
           {lookup.state === 'error' && (
             <div style={{ background: '#da363322', border: '1px solid #da363355', borderRadius: '8px', padding: '12px 16px', color: '#ff7b72', fontSize: '14px' }}>
@@ -296,7 +325,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             </div>
           )}
           <button className="btn-primary" type="submit" disabled={lookup.state === 'loading'} style={{ padding: '13px', fontSize: '15px' }}>
-            {lookup.state === 'loading' ? 'Finding your property…' : outline.state === 'busy' ? 'See My Yard →' : 'Find My Property →'}
+            {lookup.state === 'loading' ? 'Finding your yard…' : `Show My ${what} →`}
           </button>
         </form>
       </div>
@@ -305,38 +334,36 @@ export default function QuoteTool({ setPage, initialServiceId }) {
 
   // step === 'map'
   return (
-    <div style={{ maxWidth: '1100px' }}>
-      <div style={{ marginBottom: '12px' }}>
-        <button className="btn-ghost" onClick={() => setStep('details')} style={{ fontSize: '13px', padding: '6px 12px' }}>
-          ← Change Address
-        </button>
+    <div className="quote-map-step" style={{ maxWidth: '1100px' }}>
+      <div className="quote-map-head">
+        <div style={{ minWidth: 0 }}>
+          <h1 style={{ fontSize: '26px', fontWeight: 800, margin: 0 }}>Your {what}</h1>
+          <div className="quote-addr">
+            📍 {center?.manual ? 'Zoom in and find your property' : center?.approx ? `Near ${form.address.replace(/^\d+\s*/, '')}. Drag the map to your house.` : fullAddress}
+            {' '}<button type="button" className="link-btn" onClick={() => setStep('details')}>Change</button>
+          </div>
+        </div>
+        <Steps current={2} />
       </div>
-      <h1 style={{ fontSize: '30px', fontWeight: 800, marginBottom: '6px' }}>Outline Your {what}</h1>
-      <p style={{ color: 'var(--text-muted)', fontSize: '15px', marginBottom: '18px' }}>
-        {center?.manual
-          ? 'Zoom in to find your property, then '
-          : center?.approx
-            ? <>📍 We found {form.address.replace(/^\d+\s*/, '')} — drag the map to your house, then </>
-            : <>📍 {fullAddress}. Not quite right? Drag the map to your {what.toLowerCase()}. Then </>}
-        tap <b>Draw a Zone</b> and tap each corner of an area you want serviced{snow ? ' — for snow, outline every part of the lot, drive or walk you want plowed' : ''}.
-      </p>
-      <Steps current={2} />
 
-      {outlineOn && !snow && !center?.manual && (
+      {/* One short line saying what's happening and what to do. */}
+      {outlineOn && !snow && !center?.manual ? (
         <div className={`outline-auto ${outline.state}`}>
-          {outline.state === 'picking' ? (
-            <button type="button" className="btn-ghost" onClick={() => setOutline({ state: 'idle', msg: '' })}>Cancel</button>
-          ) : (
-            <button type="button" className="btn-primary" onClick={() => { const m = lastMapCenter.current || center; if (m) autoOutline(m, { tapped: true }); }} disabled={outline.state === 'busy'}>
-              {outline.state === 'busy' ? '✨ Finding your lawn…' : '✨ Outline the house under the ✛'}
+          <span>
+            {outline.state === 'busy' ? '✨ Finding your lawn… about 15 seconds.'
+              : outline.state === 'done' ? <>✅ Lawn outlined. <b>Wrong house?</b> Drag the map so the ✛ sits on your roof. Drag a corner to fix an edge.</>
+                : outline.state === 'error' ? <>{outline.msg} Or tap <b>Draw a Zone</b> and tap the corners of your lawn.</>
+                  : 'Drag the map so the ✛ sits on your roof.'}
+          </span>
+          {outline.state !== 'busy' && (
+            <button type="button" className="btn-ghost" onClick={() => { const m = lastMapCenter.current || center; if (m) autoOutline(m, { tapped: true }); }}>
+              ✨ {outline.state === 'done' ? 'Redo' : 'Outline it'}
             </button>
           )}
-          <span>
-            {outline.state === 'picking' ? <b style={{ color: 'var(--text-primary)' }}>👆 Now tap the roof of your house on the map.</b>
-              : outline.state === 'busy' ? (outline.tapped ? 'Outlining your lawn from the satellite photo. This takes about 15 seconds.' : 'Finding your house, then outlining your lawn. This takes about 20 seconds.')
-                : outline.state === 'done' ? `${outline.msg} Wrong house? Drag the map so the ✛ is on your roof and it redoes it. Drag any corner to fix an edge.`
-                  : outline.msg || 'Drag the map so the ✛ is on your roof, and we outline your lawn from the satellite photo. You can fix any corner after.'}
-          </span>
+        </div>
+      ) : (
+        <div className="outline-auto">
+          <span>Tap <b>Draw a Zone</b>, then tap each corner of an area you want serviced{snow ? '. For snow, outline every lot, drive and walk you want plowed' : ''}.</span>
         </div>
       )}
 
@@ -354,6 +381,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             onPickPoint={outline.state === 'picking' ? autoOutline : null}
             crosshair={outlineOn && !snow}
             onMoveEnd={onMapMoved}
+            fitSignal={fitSignal}
           />
         </div>
 
@@ -392,26 +420,27 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             </div>
           </div>
 
-          <div className="card" style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Anything else?</h3>
-            <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              Quote for: <b style={{ color: 'var(--text-primary)' }}>{wanted.join(', ')}</b>
-            </div>
-            <textarea className="form-input" rows={3} value={notes} onChange={e => setNotes(e.target.value)}
-              placeholder="Anything else? New beds, mulch, gate code, dogs…" style={{ resize: 'vertical' }} />
-            {submit.state === 'error' && <div style={{ color: '#ff7b72', fontSize: '13px' }}>{submit.msg}</div>}
-            <button className="btn-primary" type="button" onClick={sendQuote} disabled={!zones.length || submit.state === 'loading'}
-              style={{ padding: '13px', fontSize: '15px', opacity: zones.length ? 1 : 0.5 }}>
-              {submit.state === 'loading' ? 'Sending…' : !zones.length ? 'Draw at least one zone' : estimate == null ? 'Send to John for a Price' : `Send My Quote Request (${formatPrice(estimate)})`}
+          <button className="btn-primary quote-next" type="button" onClick={() => { setStep('contact'); window.scrollTo(0, 0); }}
+            disabled={!zones.length || outline.state === 'busy'}>
+            {outline.state === 'busy' ? 'Finding your lawn…' : !zones.length ? 'Outline your lawn first' : 'Next: where to send it →'}
+          </button>
+          {!zones.length && outline.state !== 'busy' && (
+            <button type="button" className="link-btn" onClick={() => { setStep('contact'); window.scrollTo(0, 0); }} style={{ alignSelf: 'center' }}>
+              Trouble with the map? Skip it and John will call you
             </button>
-            {!zones.length && (
-              <button type="button" onClick={sendQuote} disabled={submit.state === 'loading'}
-                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '13px', cursor: 'pointer', textDecoration: 'underline' }}>
-                Having trouble with the map? Skip it and we'll call you
-              </button>
-            )}
-          </div>
+          )}
         </div>
+      </div>
+
+      {/* Phones: price + Next stay on screen under the map. */}
+      <div className="quote-sticky">
+        <div>
+          <b>{zones.length ? (estimate != null ? formatPrice(estimate) : formatSqFt(totalSqFt)) : '—'}</b>
+          <span>{outline.state === 'busy' ? 'Finding your lawn…' : zones.length ? (estimate != null ? 'per cut' : 'John prices it') : 'Outline your lawn'}</span>
+        </div>
+        <button className="btn-primary" type="button" onClick={() => { setStep('contact'); window.scrollTo(0, 0); }} disabled={!zones.length || outline.state === 'busy'}>
+          Next →
+        </button>
       </div>
     </div>
   );
@@ -427,9 +456,9 @@ function Field({ label, children }) {
 }
 
 function Steps({ current }) {
-  const steps = ['Your Info', 'Outline the Area', 'Get Your Quote'];
+  const steps = ['Address', 'Your Yard', 'Send'];
   return (
-    <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: '8px', margin: '10px 0 16px', flexWrap: 'wrap' }}>
       {steps.map((s, i) => {
         const n = i + 1;
         const active = n === current;

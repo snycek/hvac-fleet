@@ -1092,3 +1092,32 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   .books-packet .book-print-page:last-child { break-after: auto; page-break-after: auto; }
   .book-table tr { break-inside: avoid; }
 }
+
+/* ---------- Get a quote: address → yard → send ---------- */
+.quote-services { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-top: 6px; }
+.quote-service { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; cursor: pointer; text-align: left; border: 2px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); font-weight: 600; font-size: 14px; }
+.quote-service.on { border-color: var(--accent-teal); color: var(--accent-teal); }
+.quote-service-icon { font-size: 20px; }
+.quote-service-check { margin-left: auto; }
+.quote-map-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.quote-map-head > div:last-child { margin: 0; }
+.quote-addr { color: var(--text-muted); font-size: 14px; margin-top: 2px; }
+.link-btn { background: none; border: none; padding: 0; color: var(--accent-teal); font-weight: 700; font-size: 13px; cursor: pointer; text-decoration: underline; }
+.outline-auto .btn-ghost { padding: 6px 12px; font-size: 13px; }
+.quote-next { padding: 14px; font-size: 15px; }
+.quote-next:disabled { opacity: .5; }
+.quote-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; margin-bottom: 12px; }
+.quote-summary-what { font-weight: 700; }
+.quote-summary-addr { font-size: 13px; color: var(--text-muted); }
+.quote-summary-price { font-size: 26px; font-weight: 800; color: var(--accent-teal); text-align: right; white-space: nowrap; }
+.quote-summary-price small { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.quote-sticky { display: none; }
+@media (max-width: 900px) {
+  .quote-map-step { padding-bottom: 84px; }
+  .quote-sticky { display: flex; align-items: center; justify-content: space-between; gap: 12px; position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 900; box-shadow: 0 6px 24px #000a; border-radius: 12px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); background: var(--bg-secondary, #161b22); border-top: 1px solid var(--border); }
+  .quote-sticky b { font-size: 22px; color: var(--accent-teal); margin-right: 6px; }
+  .quote-sticky span { font-size: 12.5px; color: var(--text-muted); }
+  .quote-sticky .btn-primary { padding: 11px 20px; font-size: 15px; }
+  .quote-sticky .btn-primary:disabled { opacity: .5; }
+  .quote-next { display: none; }
+}

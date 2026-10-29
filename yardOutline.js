@@ -37,15 +37,18 @@ function mercatorBox({ lat, lng }, zoom, size) {
 }
 const spanMeters = (box, lat) => Math.round(((box.east - box.west) * Math.PI / 180) * R * Math.cos((lat * Math.PI) / 180));
 
-async function keyedPhoto(point) {
+// Big properties (church, school, business): one zoom out at full size, ~230 m across.
+const WIDE = { zoom: KEYED_ZOOM - 1, size: 1024 };
+async function keyedPhoto(point, wide = false) {
   const key = process.env.ARCGIS_API_KEY;
   if (!key) return null;
-  const size = keyedSize(point.tapped);
+  const size = wide ? WIDE.size : keyedSize(point.tapped);
+  const zoom = wide ? WIDE.zoom : KEYED_ZOOM;
   const url = 'https://static-maps-api.arcgis.com/arcgis/rest/services/static-maps-service/v1/static-maps/arcgis/imagery/with-point'
-    + `?x=${point.lng}&y=${point.lat}&zoom=${KEYED_ZOOM}&symbolStyle=circle&symbolScale=0.4&symbolColor=FF0000`
+    + `?x=${point.lng}&y=${point.lat}&zoom=${zoom}&symbolStyle=circle&symbolScale=0.4&symbolColor=FF0000`
     + `&width=${size}&height=${size}&format=jpeg&token=${encodeURIComponent(key)}`;
   try {
-    const box = mercatorBox(point, KEYED_ZOOM, size);
+    const box = mercatorBox(point, zoom, size);
     return { photo: await getImage(url), box, size, span: spanMeters(box, point.lat), dot: true };
   } catch (err) {
     console.warn('[OUTLINE] keyed photo failed, using the free one:', err.message);
@@ -63,9 +66,9 @@ function bboxAround({ lat, lng }, span) {
   const dLng = span / 2 / (111320 * Math.cos((lat * Math.PI) / 180));
   return { west: lng - dLng, east: lng + dLng, south: lat - dLat, north: lat + dLat };
 }
-async function freePhoto(point) {
+async function freePhoto(point, wide = false) {
   let last = null;
-  for (const span of FREE_SPANS_M) {
+  for (const span of wide ? [220] : FREE_SPANS_M) {
     const box = bboxAround(point, span);
     try {
       const photo = await getImage('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export'
@@ -110,8 +113,11 @@ const SCHEMA = {
   },
 };
 
-function promptFor({ size, span, dot }, tapped) {
+function promptFor({ size, span, dot }, tapped, large = false) {
   const mid = size / 2;
+  const big = large
+    ? `\n\nThis is a large property (like a church, school, business or park), so this photo is zoomed out to show all of it. Outline every mowable lawn area on this one property, however far it reaches (up to 10 polygons); name them Front Yard, Back Yard, Side Yard, Side Yard 2, Boulevard or Lawn by where they sit. Parking lots and paved areas are not lawn.`
+    : '';
   const where = tapped
     ? `A lawn-care customer tapped the roof of their house, and that spot is the exact center of the photo (pixel ${mid},${mid}). The house under that spot is their property.`
     : `The center of the photo (pixel ${mid},${mid}) is where a lawn-care customer's typed street address landed on the map. Address points are often on the street, sidewalk or driveway in front of the house rather than on the roof: their property is the house that point belongs to (usually the closest house, facing the street the point is on).`;
@@ -124,7 +130,7 @@ Outline the mowable grass that belongs to that one property, as polygons in pixe
 - Many lots here have a detached garage toward the back. The lawn usually continues beside and behind it to the rear fence or alley; include that grass too (as part of the back yard, or its own polygon). Don't stop the back yard at the garage.
 - Stay on this property. Neighboring lots usually start at a fence, a hedge line, a change in mowing pattern, or halfway to the next house. If a boundary is unclear, stay a little inside it.
 - Use 4–14 points per polygon, in order around the edge, adding points where the edge bends (around a driveway or a bed).
-- If you can't find this property's grass (photo too dark, all trees, a parking lot), return no zones and say why in note.
+- If you can't find this property's grass (photo too dark, all trees, a parking lot), return no zones and say why in note.${big}
 
 Before the polygons, fill in layout: a few sentences describing this lot as you see it: where the street and sidewalk are, the house, the driveway, any detached garage or shed, fences and hedges, where the lot ends on each side and at the back, and which parts are grass. Then trace from that.
 
@@ -172,8 +178,8 @@ const pixelToLatLng = ({ box, size }, { x, y }) => [
 const HOUSE_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['found', 'x', 'y', 'reason'],
-  properties: { found: { type: 'boolean' }, x: { type: 'integer' }, y: { type: 'integer' }, reason: { type: 'string' } },
+  required: ['found', 'x', 'y', 'large', 'reason'],
+  properties: { found: { type: 'boolean' }, x: { type: 'integer' }, y: { type: 'integer' }, large: { type: 'boolean' }, reason: { type: 'string' } },
 };
 async function findHouse(point) {
   const shot = await keyedPhoto({ ...point, tapped: false });
@@ -181,10 +187,10 @@ async function findHouse(point) {
   const mid = shot.size / 2;
   const { out } = await ask(shot, `This is a straight-down satellite photo, ${shot.size}×${shot.size} pixels, about ${shot.span} meters across (north is up). The red dot at the center (pixel ${mid},${mid}) is where a customer's typed street address landed on the map. Address points are often on the street, sidewalk or driveway in front of the house instead of on the roof.
 
-Find the house this address belongs to: usually the closest house, facing the street the dot is on (if the dot is on a roof already, that's the house). Give the pixel at the middle of that house's main roof (not the garage) as x, y. If there's no house near the dot, set found to false. In reason, one short sentence on how you picked it. The strip of credit text along the bottom edge is not part of the map.`, HOUSE_SCHEMA, 'medium');
+Find the house this address belongs to: usually the closest house, facing the street the dot is on (if the dot is on a roof already, that's the house). Give the pixel at the middle of that house's main roof (not the garage) as x, y. If it's a large property instead of a house lot (a church, school, business, apartment complex or park, or its lawn clearly runs past the edge of this photo), give the middle of its main building and set large to true; for an ordinary house lot, large is false. If there's no building near the dot, set found to false. In reason, one short sentence on how you picked it. The strip of credit text along the bottom edge is not part of the map.`, HOUSE_SCHEMA, 'medium');
   if (!out.found) return null;
   const [lat, lng] = pixelToLatLng(shot, out);
-  return { lat, lng };
+  return { lat, lng, large: Boolean(out.large) };
 }
 
 export async function outlineYard(point) {
@@ -194,7 +200,20 @@ export async function outlineYard(point) {
     try { house = await findHouse(point); } catch (err) { console.warn('[OUTLINE] find house failed:', err.message); }
     if (house) point = { lat: house.lat, lng: house.lng, tapped: true };
   }
-  const shot = (await keyedPhoto(point)) || (await freePhoto(point));
+  let large = Boolean(house?.large);
+  let result = await trace(point, large);
+  if (!large && result.touchesEdge && result.zones.length) {
+    large = true;
+    const wider = await trace(point, true).catch(err => { console.warn('[OUTLINE] wide retry failed:', err.message); return null; });
+    if (wider?.zones.length) result = { ...wider, usage: addUsage(result.usage, wider.usage) };
+  }
+  return { zones: result.zones, note: result.note, warnings: result.warnings, usage: result.usage, house, large };
+}
+
+const addUsage = (a = {}, b = {}) => ({ input_tokens: (a.input_tokens || 0) + (b.input_tokens || 0), output_tokens: (a.output_tokens || 0) + (b.output_tokens || 0) });
+
+async function trace(point, large) {
+  const shot = (await keyedPhoto(point, large)) || (await freePhoto(point, large));
   const response = await getClient().beta.messages.create({
     model: MODEL,
     max_tokens: 16000,
@@ -206,7 +225,7 @@ export async function outlineYard(point) {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.photo } },
-        { type: 'text', text: promptFor(shot, point.tapped) },
+        { type: 'text', text: promptFor(shot, point.tapped, large) },
       ],
     }],
   });
@@ -221,10 +240,11 @@ export async function outlineYard(point) {
     +(box.north - (Math.min(Math.max(y, 0), size) / size) * (box.north - box.south)).toFixed(7),
     +(box.west + (Math.min(Math.max(x, 0), size) / size) * (box.east - box.west)).toFixed(7),
   ];
-  const zones = (out.zones || [])
-    .filter(z => Array.isArray(z.points) && z.points.length >= 3)
-    .slice(0, 6)
-    .map(z => ({ name: z.name, points: z.points.slice(0, 16).map(toLatLng) }));
+  const kept = (out.zones || []).filter(z => Array.isArray(z.points) && z.points.length >= 3).slice(0, large ? 10 : 6);
+  // Lawn traced right up to the photo's edge = the property keeps going past it.
+  const edge = size * 0.02;
+  const touchesEdge = kept.some(z => z.points.some(p => p.x <= edge || p.y <= edge || p.x >= size - edge || p.y >= size - edge * 3));
+  const zones = kept.map(z => ({ name: z.name, points: z.points.slice(0, 16).map(toLatLng) }));
   const warnings = (Array.isArray(out.warnings) ? out.warnings : []).map(w => String(w).trim().slice(0, 160)).filter(Boolean).slice(0, 4);
-  return { zones, note: String(out.note || '').slice(0, 200), warnings, usage: response.usage, house };
+  return { zones, note: String(out.note || '').slice(0, 200), warnings, usage: response.usage, touchesEdge };
 }

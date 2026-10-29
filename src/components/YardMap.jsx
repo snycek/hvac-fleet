@@ -33,7 +33,7 @@ function nextZoneName(zones, names = ZONE_NAME_SUGGESTIONS) {
 // drawing or selecting.
 // crosshair + onMoveEnd: a ✛ target in the middle of the map, and the map's center
 // ({ lat, lng }) each time it stops moving (the quote tool re-outlines the house under it).
-export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null, crosshair = false, onMoveEnd = null }) {
+export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null, crosshair = false, onMoveEnd = null, fitSignal = 0 }) {
   const zoneNamesRef = useRef(zoneNames);
   useEffect(() => { zoneNamesRef.current = zoneNames; }, [zoneNames]);
   const containerRef = useRef(null);
@@ -100,7 +100,8 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     if (readOnly && allPoints.length) {
       map.fitBounds(L.latLngBounds(allPoints), { padding: [24, 24], maxZoom: 20 });
     } else if (center) {
-      map.setView([center.lat, center.lng], 20);
+      // Wide enough to see a whole lot (~120 m across), not just the house.
+      map.setView([center.lat, center.lng], 19);
     }
     if (center && !readOnly) {
       if (pinRef.current) pinRef.current.setLatLng([center.lat, center.lng]);
@@ -109,6 +110,16 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     // Only re-center when the property changes, not on every zone edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.lat, center?.lng, readOnly]);
+
+  // A new automatic outline landed: zoom to show all of it (and the house pin).
+  useEffect(() => {
+    const map = mapRef.current;
+    const pts = zones.flatMap(z => z.points);
+    if (!map || !fitSignal || !pts.length) return;
+    if (center) pts.push([center.lat, center.lng]);
+    map.fitBounds(L.latLngBounds(pts), { padding: [36, 36], maxZoom: 20 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitSignal]);
 
   // Picking a point: crosshair cursor.
   useEffect(() => {

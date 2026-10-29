@@ -436,7 +436,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
               <p className="lot-size">
                 <span className="lot-swatch" aria-hidden="true" /> Your lot: <b>{formatSqFt(lot.sqFt)}</b>
                 {zones.length > 0 && <> · lawn {Math.min(100, Math.round((totalSqFt / lot.sqFt) * 100))}% of it</>}
-                <small>Dashed line = property line from county records</small>
+                <small>Dashed line = county property line (can be a few feet off the photo)</small>
               </p>
             )}
             {!zones.length && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Zones you draw show up here. You can rename them.</p>}

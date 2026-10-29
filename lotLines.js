@@ -116,7 +116,7 @@ export function lotBox(ring) {
 
 // ---- Keep outlines on the lot ----
 // Clip each lawn polygon to the lot (its convex hull, pushed out ~1.5 m because county
-// lines and the photo can be off by a step or so). Lots are nearly always convex here.
+// lines and the photo can be off by a few meters). Lots are nearly always convex here.
 function hull(points) {
   const p = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
@@ -147,8 +147,32 @@ function clipConvex(subject, clip) {
   }
   return out;
 }
+// County lines sit up to ~2-3 m off the satellite photo here (14640 N Yost: ~2.5 m), so the
+// trim leaves that much room; the AI follows the real edges (driveway, fence, wall) inside it.
+const LOT_SLACK = 3;
 // Front lot line to curb, plus room for the boulevard (60–66 ft roads here: ~5–7 m).
 const STREET_REACH = 10;
+// Move every edge of a convex counter-clockwise polygon out by d meters (sides included,
+// not just the corners), meeting at the new corners.
+function growConvex(poly, d) {
+  const n = poly.length;
+  const lines = poly.map((a, i) => {
+    const b = poly[(i + 1) % n];
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+    const nx = (b[1] - a[1]) / len, ny = -(b[0] - a[0]) / len; // outward for CCW
+    return { p: [a[0] + nx * d, a[1] + ny * d], v: [b[0] - a[0], b[1] - a[1]] };
+  });
+  return poly.map((corner, i) => {
+    const L1 = lines[(i - 1 + n) % n], L2 = lines[i];
+    const den = L1.v[0] * L2.v[1] - L1.v[1] * L2.v[0];
+    if (Math.abs(den) < 1e-9) return [L2.p[0], L2.p[1]]; // straight through
+    const t = ((L2.p[0] - L1.p[0]) * L2.v[1] - (L2.p[1] - L1.p[1]) * L2.v[0]) / den;
+    const q = [L1.p[0] + t * L1.v[0], L1.p[1] + t * L1.v[1]];
+    // A very sharp corner shoots far out; keep it within 3×d of the old corner.
+    const k = Math.hypot(q[0] - corner[0], q[1] - corner[1]);
+    return k > 3 * d ? [corner[0] + ((q[0] - corner[0]) / k) * 3 * d, corner[1] + ((q[1] - corner[1]) / k) * 3 * d] : q;
+  });
+}
 const areaM2 = pts => Math.abs(pts.reduce((s, p, i) => { const q = pts[(i + 1) % pts.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2;
 
 /**
@@ -160,9 +184,8 @@ export function clipToLot(zones, ring) {
   const { mid } = lotBox(ring);
   const fwd = toXY(mid), back = toLL(mid);
   const h = hull(ring.map(fwd));
-  // Push the hull out 1.5 m from its middle.
   const cx = h.reduce((s, p) => s + p[0], 0) / h.length, cy = h.reduce((s, p) => s + p[1], 0) / h.length;
-  const grown = h.map(([x, y]) => { const d = Math.hypot(x - cx, y - cy) || 1; return [x + ((x - cx) / d) * 1.5, y + ((y - cy) / d) * 1.5]; });
+  const grown = growConvex(h, LOT_SLACK);
   // The front lot line usually sits a few meters behind the sidewalk: the strip out to the
   // curb (front lawn edge, sidewalk, boulevard) is city land the owner mows. So the street
   // side gets the lot stretched STREET_REACH m toward the street (same width as the lot).

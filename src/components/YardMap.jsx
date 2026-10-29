@@ -33,7 +33,7 @@ function nextZoneName(zones, names = ZONE_NAME_SUGGESTIONS) {
 // drawing or selecting.
 // crosshair + onMoveEnd: a ✛ target in the middle of the map, and the map's center
 // ({ lat, lng }) each time it stops moving (the quote tool re-outlines the house under it).
-export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null, crosshair = false, onMoveEnd = null, fitSignal = 0 }) {
+export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null, crosshair = false, onMoveEnd = null, fitSignal = 0, lot = null }) {
   const zoneNamesRef = useRef(zoneNames);
   useEffect(() => { zoneNamesRef.current = zoneNames; }, [zoneNames]);
   const containerRef = useRef(null);
@@ -111,10 +111,23 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.lat, center?.lng, readOnly]);
 
-  // A new automatic outline landed: zoom to show all of it (and the house pin).
+  // Lot lines (county records): a dashed line around the property.
+  const lotRef = useRef(null);
   useEffect(() => {
     const map = mapRef.current;
-    const pts = zones.flatMap(z => z.points);
+    if (!map) return;
+    lotRef.current?.remove();
+    lotRef.current = lot?.length >= 3
+      ? L.polygon(lot, { color: '#ffd166', weight: 2.5, dashArray: '8 6', fill: false, interactive: false }).addTo(map)
+      : null;
+    if (readOnly && lotRef.current && !zones.length) map.fitBounds(lotRef.current.getBounds(), { padding: [24, 24], maxZoom: 20 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lot]);
+
+  // A new automatic outline (or the lot line) landed: zoom to show all of it (and the house pin).
+  useEffect(() => {
+    const map = mapRef.current;
+    const pts = [...zones.flatMap(z => z.points), ...(lot || [])];
     if (!map || !fitSignal || !pts.length) return;
     if (center) pts.push([center.lat, center.lng]);
     map.fitBounds(L.latLngBounds(pts), { padding: [36, 36], maxZoom: 20 });

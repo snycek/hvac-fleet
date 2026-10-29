@@ -17,6 +17,7 @@ import { COMPANY_INFO } from './src/data/services.js';
 import { CREW_KINDS, EMPLOYEE_ROLES, crewKind, isLandscapingJob } from './src/lib/crews.js';
 import { cleanItems, offerTotal, quoteMessage } from './src/lib/landscape.js';
 import { outlineReady, outlineYard } from './yardOutline.js';
+import { findLot, lotBox } from './lotLines.js';
 import { SITE_CHECK, applyAnswers, newChecks } from './src/lib/siteCheck.js';
 import { newNote } from './src/lib/crewNotes.js';
 import crypto from 'crypto';
@@ -80,6 +81,7 @@ const PUBLIC_API = [
   ['POST', /^\/api\/contact$/],
   ['*', /^\/api\/yard-outline$/],
   ['GET', /^\/api\/map-config$/],
+  ['GET', /^\/api\/lot$/],
   ['GET', /^\/api\/geocode/],
   ['GET', /^\/api\/address-suggest/],
   ['POST', /^\/api\/technicians\/apply$/],
@@ -274,6 +276,12 @@ function sanitizeQuote(quote) {
     // null = John prices it (snow removal).
     estimate: quote.estimate == null ? null : Math.max(0, Math.round(Number(quote.estimate) || 0)),
     wanted: (Array.isArray(quote.wanted) ? quote.wanted : []).slice(0, 5).map(s => String(s).slice(0, 40)),
+    ...(quote.lot && Array.isArray(quote.lot.ring) ? {
+      lot: {
+        sqFt: Math.max(0, Math.round(Number(quote.lot.sqFt) || 0)),
+        ring: quote.lot.ring.slice(0, 400).map(p => validLatLng({ lat: p?.[0], lng: p?.[1] })).filter(Boolean).map(p => [p.lat, p.lng]),
+      },
+    } : {}),
     // ✨ auto-outline: whether it was used, whether the customer adjusted it, and what the
     // AI says John should double-check (tree cover hiding grass, unclear lot lines…).
     ...(quote.outline?.auto ? {
@@ -332,6 +340,29 @@ let outlineDay = { date: '', count: 0 };
 // public (restricted to John's site in ArcGIS), so it's fine to hand to the browser.
 app.get('/api/map-config', (_req, res) => res.json({ imageryKey: process.env.ARCGIS_API_KEY || null }));
 
+// Lot lines (Wayne County parcels) for the quote map: just the outline and size.
+const lotHits = new Map(); // ip → [times]
+app.get('/api/lot', async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lng = Number(req.query.lng);
+  if (!(lat > 41.5 && lat < 43 && lng > -84.5 && lng < -82.5)) return res.status(400).json({ error: 'outside the service area' });
+  const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+  const recent = (lotHits.get(ip) || []).filter(t0 => Date.now() - t0 < 3600 * 1000);
+  if (recent.length >= 120) return res.status(429).json({ error: 'Too many lookups.' });
+  lotHits.set(ip, [...recent, Date.now()]);
+  if (lotHits.size > 5000) lotHits.clear();
+  try {
+    const lot = await findLot({ lat, lng, address: String(req.query.address || '').slice(0, 200) });
+    if (!lot) return res.json({ lot: null });
+    const { mid } = lotBox(lot.ring);
+    // matched: the county address is theirs, so mid is where their pin belongs.
+    return res.json({ lot: { ring: lot.ring, sqFt: lot.sqFt, matched: lot.matched, mid: { lat: +mid.lat.toFixed(7), lng: +mid.lng.toFixed(7) } } });
+  } catch (err) {
+    console.warn('[LOT] lookup failed:', err?.message || err);
+    return res.json({ lot: null });
+  }
+});
+
 // The quote tool only shows the button when this is on (an API key is set).
 app.get('/api/yard-outline', (_req, res) => res.json({ ready: outlineReady() }));
 app.post('/api/yard-outline', async (req, res) => {
@@ -341,7 +372,8 @@ app.post('/api/yard-outline', async (req, res) => {
   // Stay roughly in the service area (Downriver Michigan).
   if (!(lat > 41.5 && lat < 43 && lng > -84.5 && lng < -82.5)) return res.status(400).json({ error: 'That spot is outside our service area.' });
   const tapped = req.body?.tapped !== false; // false: the typed address (outlined as soon as the map opens)
-  const key = `${lat.toFixed(5)},${lng.toFixed(5)},${tapped ? 't' : 'a'}`;
+  const address = tapped ? '' : String(req.body?.address || '').slice(0, 200); // picks the right lot when the pin is in the street
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)},${tapped ? 't' : 'a'},${address}`;
   const cached = outlineCache.get(key);
   if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return res.json(cached.result);
 
@@ -355,8 +387,8 @@ app.post('/api/yard-outline', async (req, res) => {
   outlineDay.count += 1;
 
   try {
-    const { zones, note, warnings, usage, house } = await outlineYard({ lat, lng, tapped });
-    const result = { zones, note, warnings, ...(house ? { house } : {}) };
+    const { zones, note, warnings, usage, house, lot } = await outlineYard({ lat, lng, tapped, address });
+    const result = { zones, note, warnings, ...(house ? { house } : {}), ...(lot ? { lot } : {}) };
     outlineCache.set(key, { at: Date.now(), result });
     console.log(`[OUTLINE] ${key} → ${zones.length} zones (${usage?.input_tokens || 0} in / ${usage?.output_tokens || 0} out)`);
     return res.json(result);

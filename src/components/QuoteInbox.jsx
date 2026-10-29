@@ -311,7 +311,7 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
       )}
 
       {zones.length > 0 ? (
-        <div className="quote-yard"><YardMap zones={zones} readOnly height="240px" /></div>
+        <div className="quote-yard"><YardMap zones={zones} lot={quote?.lot?.ring} readOnly height="240px" /></div>
       ) : (
         <div style={{ padding: '18px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '10px', color: 'var(--text-muted)', fontSize: '13px' }}>
           Customer skipped the map — call to measure.

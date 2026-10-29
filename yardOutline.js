@@ -6,6 +6,7 @@
 // Photo: with ARCGIS_API_KEY, Esri's Static Maps (licensed for business use, newer, sharper);
 // otherwise Esri's free export.
 import Anthropic from '@anthropic-ai/sdk';
+import { findLot, lotBox, clipToLot } from './lotLines.js';
 
 const MODEL = 'claude-opus-5-5';
 let client = null;
@@ -113,12 +114,16 @@ const SCHEMA = {
   },
 };
 
-function promptFor({ size, span, dot }, tapped, large = false) {
+function promptFor({ size, span, dot }, tapped, large = false, lot = null) {
   const mid = size / 2;
   const big = large
     ? `\n\nThis is a large property (like a church, school, business or park), so this photo is zoomed out to show all of it. Outline every mowable lawn area on this one property, however far it reaches (up to 10 polygons); name them Front Yard, Back Yard, Side Yard, Side Yard 2, Boulevard or Lawn by where they sit. Parking lots and paved areas are not lawn.`
     : '';
-  const where = tapped
+  const where = lot
+    ? `The customer's lot lines, from county parcel records, are this polygon in pixel coordinates (x, y): ${JSON.stringify(lot.px)}. That lot (about ${lot.sqFt.toLocaleString('en-US')} sq ft) is their property${dot ? '; the red dot is just the middle of it' : ''}.
+
+Only outline grass inside those lot lines. County lines can be off from the photo by a meter or two, so near a line follow the real edge you see (fence, sidewalk, hedge, mowing line). The boulevard strip between the public sidewalk and the street sits just outside the front lot line; include it if the lot has one.`
+    : tapped
     ? `A lawn-care customer tapped the roof of their house, and that spot is the exact center of the photo (pixel ${mid},${mid}). The house under that spot is their property.`
     : `The center of the photo (pixel ${mid},${mid}) is where a lawn-care customer's typed street address landed on the map. Address points are often on the street, sidewalk or driveway in front of the house rather than on the roof: their property is the house that point belongs to (usually the closest house, facing the street the point is on).`;
   return `This is a straight-down satellite photo, ${size}×${size} pixels, about ${span} meters across (north is up, ~${((span / size) * 100).toFixed(0)} cm per pixel). ${where}
@@ -136,7 +141,7 @@ Before the polygons, fill in layout: a few sentences describing this lot as you 
 
 In note, give one short sentence the customer will see (e.g. "Outlined your front and back lawns; check the edge by the driveway").
 
-In warnings, list for the business owner (not the customer) anything to double-check before pricing, one short sentence each naming the area, for example: "Back yard mostly under heavy tree cover; grass there isn't outlined", "Rear lot line unclear; back yard may extend further", "Back of the lot is out of the photo". Only real concerns; leave it empty if the outline looks complete.${dot
+In warnings, list for the business owner (not the customer) anything to double-check before pricing, one short sentence each naming the area, for example: "Back yard mostly under heavy tree cover; grass there isn't outlined", "Rear lot line unclear; back yard may extend further", "Back of the lot is out of the photo". Only real concerns; leave it empty if the outline looks complete. Never mention pixel coordinates in note or warnings; describe places in plain words ("south edge below the parking lot").${dot
     ? `\n\nA small red dot marks ${tapped ? 'the spot they tapped (on their roof)' : 'the address point'}. The strip of credit text along the bottom edge is not part of the property.`
     : ''}`;
 }
@@ -194,7 +199,12 @@ Find the house this address belongs to: usually the closest house, facing the st
 }
 
 export async function outlineYard(point) {
-  // Typed address: find the roof first, then trace from the roof like a tap.
+  // County lot lines: no guessing which house or how big. Outline inside the lot.
+  let lot = null;
+  try { lot = await findLot(point); } catch (err) { console.warn('[OUTLINE] lot lines failed:', err.message); }
+  if (lot && lot.ring.length >= 3) return outlineLot(point, lot);
+
+  // No lot lines. Typed address: find the roof first, then trace from the roof like a tap.
   let house = null;
   if (!point.tapped) {
     try { house = await findHouse(point); } catch (err) { console.warn('[OUTLINE] find house failed:', err.message); }
@@ -210,10 +220,41 @@ export async function outlineYard(point) {
   return { zones: result.zones, note: result.note, warnings: result.warnings, usage: result.usage, house, large };
 }
 
+// Lot known: photo centered on the lot, wide when the lot doesn't fit the normal one
+// (~113 m across), lot lines in the prompt, and the result trimmed to the lot.
+async function outlineLot(point, lot) {
+  const { mid, width, height } = lotBox(lot.ring);
+  const across = Math.max(width, height) + 16;
+  const wide = across > 100;
+  const center = { lat: mid.lat, lng: mid.lng, tapped: false };
+  const result = await trace(center, wide, lot);
+  const { zones } = clipToLot(result.zones, lot.ring);
+  const warnings = [...result.warnings];
+  if (across > (wide ? 220 : 110)) warnings.unshift('Lot is bigger than the satellite photo; some of it may not be outlined.');
+  return {
+    zones, note: result.note, warnings: warnings.slice(0, 4), usage: result.usage, large: wide,
+    house: point.tapped ? null : { lat: +mid.lat.toFixed(7), lng: +mid.lng.toFixed(7) },
+    lot: { ring: lot.ring, sqFt: lot.sqFt },
+  };
+}
+
 const addUsage = (a = {}, b = {}) => ({ input_tokens: (a.input_tokens || 0) + (b.input_tokens || 0), output_tokens: (a.output_tokens || 0) + (b.output_tokens || 0) });
 
-async function trace(point, large) {
+async function trace(point, large, lot = null) {
   const shot = (await keyedPhoto(point, large)) || (await freePhoto(point, large));
+  // Lot lines in this photo's pixels (at most ~60 corners).
+  let lotPx = null;
+  if (lot) {
+    const { box, size } = shot;
+    const step = Math.ceil(lot.ring.length / 60);
+    lotPx = {
+      sqFt: lot.sqFt,
+      px: lot.ring.filter((_, i) => i % step === 0).map(([la, ln]) => [
+        Math.round(((ln - box.west) / (box.east - box.west)) * size),
+        Math.round(((box.north - la) / (box.north - box.south)) * size),
+      ]),
+    };
+  }
   const response = await getClient().beta.messages.create({
     model: MODEL,
     max_tokens: 16000,
@@ -225,7 +266,7 @@ async function trace(point, large) {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.photo } },
-        { type: 'text', text: promptFor(shot, point.tapped, large) },
+        { type: 'text', text: promptFor(shot, point.tapped, large, lotPx) },
       ],
     }],
   });

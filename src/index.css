@@ -1121,3 +1121,8 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   .quote-sticky .btn-primary:disabled { opacity: .5; }
   .quote-next { display: none; }
 }
+
+/* Lot lines (county records) on the quote map */
+.lot-size { font-size: 13px; color: var(--text-primary); margin: 0 0 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.lot-size small { flex-basis: 100%; color: var(--text-muted); font-size: 11.5px; }
+.lot-swatch { width: 18px; height: 0; border-top: 2.5px dashed #ffd166; display: inline-block; }

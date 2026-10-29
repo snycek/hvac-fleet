@@ -60,6 +60,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     // Only the street was known: start on the street and let them find the house.
     if (!found && picked && Number.isFinite(picked.lat)) found = { lat: picked.lat, lng: picked.lng, approx: true };
     if (found) {
+      setLot(null);
       // Already found their roof in the background (address picked earlier)? Start there.
       const early = earlyHouse.current;
       setCenter(early && early.from === `${found.lat},${found.lng}` ? { lat: early.lat, lng: early.lng } : found);
@@ -83,6 +84,15 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   const [outlineOn, setOutlineOn] = useState(false); // server has it set up
   const [fitSignal, setFitSignal] = useState(0); // bump → the map zooms to show all zones
   const fitMove = useRef(false);
+  // County lot lines: { ring: [[lat, lng]...], sqFt }, drawn dashed on the map.
+  const [lot, setLot] = useState(null);
+  const lotLive = useRef(null);
+  lotLive.current = lot;
+  const fitMap = () => {
+    fitMove.current = true;
+    setTimeout(() => { fitMove.current = false; }, 1500); // in case the map didn't need to move
+    setFitSignal(n => n + 1);
+  };
   useEffect(() => {
     let off = false;
     fetch('/api/yard-outline').then(r => (r.ok ? r.json() : null)).then(d => { if (!off) setOutlineOn(Boolean(d?.ready)); }).catch(() => {});
@@ -98,10 +108,11 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     lastOutlined.current = { lat: house.lat, lng: house.lng };
     setOutline({ state: 'busy', msg: '', tapped });
     try {
-      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng, tapped }) });
+      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng, tapped, ...(tapped ? {} : { address: fullAddress }) }) });
       const data = await res.json().catch(() => ({}));
       if (run !== runId.current) return; // a newer outline was started
       if (!res.ok) throw new Error(data.error || 'Could not outline it automatically.');
+      if (data.lot || tapped) setLot(data.lot || null);
       if (!data.zones?.length) throw new Error(data.note || "We couldn't spot your lawn in the photo. Tap Draw a Zone to outline it yourself.");
       const stamp = Date.now();
       const auto = data.zones.map((z, i) => ({ id: `auto-${stamp}-${i}`, name: z.name, color: ZONE_COLORS[i % ZONE_COLORS.length], points: z.points }));
@@ -121,9 +132,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       });
       setSelectedId(null);
       // Zoom out to show everything it outlined. That zoom isn't the customer moving the map.
-      fitMove.current = true;
-      setTimeout(() => { fitMove.current = false; }, 1500); // in case the map didn't need to move
-      setFitSignal(n => n + 1);
+      fitMap();
       setOutline({ state: 'done', tapped, msg: data.note || 'Outlined your lawn. Tap a zone to drag its corners.' });
     } catch (err) {
       if (run === runId.current) setOutline({ state: 'error', msg: err.message });
@@ -141,6 +150,27 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     autoOutline(center, { tapped: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, outlineOn, snow, center?.lat, center?.lng]);
+
+  // The lot line shows as soon as the map opens (the outline takes ~15 s more).
+  useEffect(() => {
+    if (step !== 'map' || !center?.lat || center.manual) return;
+    let off = false;
+    const q = new URLSearchParams({ lat: center.lat, lng: center.lng, ...(center.approx ? {} : { address: fullAddress }) });
+    fetch(`/api/lot?${q}`).then(r => (r.ok ? r.json() : null)).then(d => {
+      if (off || !d?.lot) return;
+      if (lotLive.current) return; // the outline already brought it
+      setLot(d.lot);
+      // Their address matched a county lot away from the pin: move the pin onto the lot.
+      const mid = d.lot.matched && d.lot.mid;
+      if (mid && metersApart(mid, center) > 20) {
+        if (autoRan.current) autoRan.current = `${mid.lat},${mid.lng}`; // the running outline finds the same lot
+        setCenter(c => (c ? { ...c, lat: mid.lat, lng: mid.lng } : c));
+      }
+      fitMap();
+    }).catch(() => {});
+    return () => { off = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, center?.lat, center?.lng]);
 
   // Picking their address from the suggestions goes straight to the map: no button.
   const earlyHouse = useRef(null); // { from: 'lat,lng' of the picked address, lat, lng } once the roof is found
@@ -194,6 +224,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       wanted,
       center,
       zones: zones.map(z => ({ name: z.name, color: z.color, sqFt: Math.round(areaSqFt(z.points)), points: z.points })),
+      ...(lot ? { lot } : {}),
       // ✨ outlined automatically? (and what the AI flagged for John)
       ...(zones.some(z => String(z.id).startsWith('auto-')) ? {
         outline: { auto: true, edited: JSON.stringify(zones) !== autoShapes.current, warnings: autoWarnings.current },
@@ -382,6 +413,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             crosshair={outlineOn && !snow}
             onMoveEnd={onMapMoved}
             fitSignal={fitSignal}
+            lot={lot?.ring}
           />
         </div>
 
@@ -400,6 +432,13 @@ export default function QuoteTool({ setPage, initialServiceId }) {
 
           <div className="card" style={{ padding: '18px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '12px' }}>Your Zones</h3>
+            {lot?.sqFt > 0 && (
+              <p className="lot-size">
+                <span className="lot-swatch" aria-hidden="true" /> Your lot: <b>{formatSqFt(lot.sqFt)}</b>
+                {zones.length > 0 && <> · lawn {Math.min(100, Math.round((totalSqFt / lot.sqFt) * 100))}% of it</>}
+                <small>Dashed line = property line from county records</small>
+              </p>
+            )}
             {!zones.length && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Zones you draw show up here. You can rename them.</p>}
             <datalist id="zone-names">{ZONE_NAME_SUGGESTIONS.map(n => <option key={n} value={n} />)}</datalist>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

@@ -17,7 +17,8 @@ export function housekeepingItems(jobs, today) {
 }
 
 /** How many things on the To-Do need the owner (the tab badge). */
-export function todoCount({ jobs, expenses, today, settings, statementsReady, hideQuotes = true }) {
+// payDue: unpaid payroll weeks (payrollDue in payroll.js) — one To-Do item each.
+export function todoCount({ jobs, expenses, today, settings, statementsReady, hideQuotes = true, payDue = [] }) {
   const chores = housekeepingItems(jobs, today);
   const quotes = jobs.filter(j => j.status === 'quote').length;
   return (hideQuotes ? (quotes ? 1 : 0) : quotes)
@@ -28,5 +29,6 @@ export function todoCount({ jobs, expenses, today, settings, statementsReady, hi
     + pastDueCustomers(jobs, today, 1, settings).filter(c => !c.recentlyReminded && !c.check).length
     + pendingChecks(jobs).length
     + jobs.filter(j => j.status === 'completed' && !j.paid && j.paymentIssue).length
-    + chores.noContact.length + chores.staleQuotes.length;
+    + chores.noContact.length + chores.staleQuotes.length
+    + payDue.length;
 }

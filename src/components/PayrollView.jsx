@@ -162,9 +162,10 @@ function PayHistory({ employee, data, today, onStub, onPaid }) {
 }
 
 /** Crew & Payroll: roster on the left, the week's timesheet + pay on the right. */
-export default function PayrollView({ technicians, jobs, shifts, delays, payroll, today = todayString() }) {
+// startWeek: open on that week (the To-Do's "Run payroll" for a late week).
+export default function PayrollView({ technicians, jobs, shifts, delays, payroll, today = todayString(), startWeek = null }) {
   const { employees, settings, addEmployee, updateEmployee, setHours, setPaid } = payroll;
-  const [anchor, setAnchor] = useState(null); // null = this week
+  const [anchor, setAnchor] = useState(startWeek); // null = this week
   const [openPerson, setOpenPerson] = useState(null); // employee id whose pay history is showing
   const [stub, setStub] = useState(null); // { employee, crewName, stub, ytd }
   const week = weekDates(anchor || today);

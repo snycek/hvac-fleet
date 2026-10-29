@@ -12,7 +12,7 @@ import { notPayment, lastPaymentContact } from '../lib/notify.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
-import { todayString } from '../lib/dates.js';
+import { addDays, todayString } from '../lib/dates.js';
 
 const sectionTitle = { fontSize: '14px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' };
 
@@ -73,7 +73,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck, sendLandscapeQuote, acceptLandscapeQuote, trucks, shop, onShowOnMap }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck, sendLandscapeQuote, acceptLandscapeQuote, trucks, shop, onShowOnMap, payDue = [], onOpenPayroll }) {
   // Checks customers said are on the way: John marks each received (paid) or bounced.
   const checks = pendingChecks(jobs);
   const [settling, setSettling] = useState(null);
@@ -179,7 +179,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     try { await remindCustomer(job.id, reminderMessage(job, COMPANY_INFO.name)); } finally { setReminding(null); }
   };
   const unpaidTotal = unpaid.reduce((s, j) => s + (j.earnings || 0), 0);
-  const total = todoCount({ jobs, expenses, today, settings, statementsReady, hideQuotes });
+  const total = todoCount({ jobs, expenses, today, settings, statementsReady, hideQuotes, payDue });
 
 
   // One past-due account row (used by both "needs action" and "reminded, waiting").
@@ -292,6 +292,24 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
       </div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: bare ? '14px' : '22px' }}>
+        {/* Payday: John pays the crew every Friday. */}
+        {payDue.length > 0 && (
+          <div>
+            <h3 style={{ ...sectionTitle, color: '#3fb950' }}>👷 Payday</h3>
+            <div className="card todo-pay-card">
+              {payDue.map(p => (
+                <div key={p.weekStart} className="todo-pay-row">
+                  <div style={{ minWidth: 0, flex: '1 1 180px' }}>
+                    <div><b>{p.late ? '⚠️ Crew pay is late' : 'Pay the crew today'}</b> · week of {shortDate(p.weekStart)}–{shortDate(addDays(p.weekStart, 6))}</div>
+                    <div className="cust-dim">{p.people} {p.people === 1 ? 'person' : 'people'} · {money(p.total)}{p.late ? ` · was due ${shortDate(p.payday)}` : ''}</div>
+                  </div>
+                  {onOpenPayroll && <button type="button" className="btn-primary" onClick={() => onOpenPayroll(p.weekStart)} style={{ padding: '6px 14px', fontSize: '12px' }}>Run payroll →</button>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Billing: this month's statements to send, then anyone past due. */}
         {statementsReady && (
           <div>

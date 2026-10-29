@@ -65,6 +65,27 @@ export function buildPayroll({ employees, week, jobs, shifts, delays, settings }
   });
 }
 
+// ---- Payday reminder ----
+// John pays the crew weekly, on Friday. From Friday on, a week that has hours but isn't
+// marked paid shows on the To-Do; weeks before that are late. Looks back 4 weeks.
+export const PAYDAY = 4; // Mon = 0 … Fri = 4
+
+/** Unpaid weeks due now: [{ weekStart, payday, people, total, late }], oldest first. */
+export function payrollDue({ employees, jobs, shifts, delays, settings, today = todayString(), weeksBack = 4 }) {
+  const out = [];
+  const thisMonday = periodRange('week', today).from;
+  for (let w = weeksBack; w >= 0; w--) {
+    const weekStart = addDays(thisMonday, -7 * w);
+    const payday = addDays(weekStart, PAYDAY);
+    if (payday > today) continue;
+    const rows = buildPayroll({ employees, week: weekDates(weekStart), jobs, shifts, delays, settings })
+      .filter(r => r.gross > 0 && !r.paidAt);
+    if (!rows.length) continue;
+    out.push({ weekStart, payday, people: rows.length, total: Math.round(rows.reduce((s, r) => s + r.gross, 0) * 100) / 100, late: weekStart < thisMonday });
+  }
+  return out;
+}
+
 /** What the crews billed (cuts finished) that week, for labor-cost %. */
 export function billedInWeek(jobs, week) {
   return jobs

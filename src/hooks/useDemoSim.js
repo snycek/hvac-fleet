@@ -76,7 +76,7 @@ function landJob(lawn, date) {
   const total = items.reduce((s, i) => s + i.amount, 0);
   return {
     ...baseJob(lawn), id, lawnId: null, service: 'Landscaping', requested: ['Landscaping'],
-    assignedTo: LAND.id, earnings: total, repeatDays: 0, billing: 'visit', notes: plan.label,
+    assignedTo: LAND.id, earnings: total, repeatDays: 0, billing: 'visit', project: plan.label, // (not notes: those are the customer's own lawn notes)
     status: 'assigned', scheduledDate: date, createdAt: iso(at(addDays(date, -14), 9)),
     offer: { items, total, startDate: date, techId: LAND.id, answer: 'accepted', sentAt: iso(at(addDays(date, -15), 18)) },
   };

@@ -5,7 +5,7 @@ import { useExpenses } from '../hooks/useExpenses.js';
 import { useDelays } from '../hooks/useDelays.js';
 import { useShifts } from '../hooks/useShifts.js';
 import { usePayments } from '../hooks/usePayments.js';
-import { laborExpenses } from '../lib/payroll.js';
+import { laborExpenses, payrollDue } from '../lib/payroll.js';
 import { SPEEDS, useDemoSim } from '../hooks/useDemoSim.js';
 import FleetMap from '../components/FleetMap.jsx';
 import OwnerTodo from '../components/OwnerTodo.jsx';
@@ -379,7 +379,12 @@ export default function OwnerView({ demoOnly = false } = {}) {
       if (collapsed.todo) setCollapsed(c => ({ ...c, todo: false }));
     }
   }
-  const todoCount = useMemo(() => countTodo({ jobs: allJobs, expenses, today, settings, statementsReady }), [allJobs, expenses, today, settings, statementsReady]);
+  // Payday reminder: weeks the crew hasn't been paid for yet (from Friday on).
+  const payDue = useMemo(() => payrollDue({ employees: payroll.employees, jobs, shifts, delays, settings: payroll.settings, today }),
+    [payroll.employees, payroll.settings, jobs, shifts, delays, today]);
+  const [payWeek, setPayWeek] = useState(null);
+  const openPayroll = weekStart => { setPayWeek(weekStart); setPrinting(null); if (isPhone) setPhoneTab('crew'); else setView('payroll'); };
+  const todoCount = useMemo(() => countTodo({ jobs: allJobs, expenses, today, settings, statementsReady, payDue }), [allJobs, expenses, today, settings, statementsReady, payDue]);
 
   const kpiGroups = [
     { title: 'Today', tiles: [
@@ -491,6 +496,15 @@ export default function OwnerView({ demoOnly = false } = {}) {
       }, 200);
     }, 200);
   };
+  // Map step: open one truck's popup (a mower that's out working, else any truck on the map).
+  const pickTourTruck = () => {
+    setSelectedTechId(null);
+    setTimeout(() => {
+      const out = mapTechs.filter(t => t.location && t.kind !== 'plow');
+      const pick = out.find(t => ['busy', 'en_route'].includes(t.status) && t.kind !== 'landscape') || out[0];
+      if (pick) setSelectedTechId(pick.id);
+    }, 400);
+  };
   const tourSteps = [
     { targets: ['.phone-demo-pill', '.demo-bar'], title: '🎬 This is a live demo', before: showHub,
       text: `It's playing at ${sim.speed}× speed with ${sim.truckCount} truck${sim.truckCount === 1 ? '' : 's'}, on made-up customers in Allen Park. ${isPhone ? 'Tap here' : 'Use these controls'} to change the speed, add trucks, pause, or jump to winter.` },
@@ -514,8 +528,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
         setTimeout(() => [...document.querySelectorAll('aside.cust-card .cust-tabs button')].find(b => b.innerText.includes('Property'))?.click(), 250);
       },
       text: 'Their card has the yard outline, price and schedule. Every visit, payment and message will collect here from now on.' },
-    { targets: ['.phone-map', '.dash-map'], title: '🗺️ Live map', before: showHub,
-      text: "Trucks move as the crews work. Tap any lawn to open that customer's card, or a truck to see its day." },
+    { targets: ['.phone-map', '.dash-map'], title: '🗺️ Live map', before: () => { showHub(); pickTourTruck(); }, after: () => setSelectedTechId(null),
+      text: "Trucks move as the crews work. Here's one truck's day: what it's earned, how many lawns are cut, and where it's headed. Tap any truck or lawn to see more." },
     { targets: ['.phone-tabs button:nth-child(4)', '.cust-search input'], title: '🔍 Find any customer', before: showHub,
       text: 'Search by address, name or phone to see their visits, payments, and yard outline.' },
     { targets: ['.print-root .invoice-sheet'], title: "💵 A customer's monthly bill", before: showStatement,
@@ -549,6 +563,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
     promiseCheck: demoOn ? sim.promiseCheck : live.promiseCheck, settleCheck: demoOn ? sim.settleCheck : live.settleCheck,
     ...landQuoteFns,
     trucks: mapTechs, shop, onShowOnMap: showQuoteOnMap,
+    payDue, onOpenPayroll: openPayroll,
   };
   const routeTechList = demoOn ? technicians.filter(t => t.status !== 'offline') : technicians;
   const mapEl = (
@@ -648,7 +663,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           )}
           {phoneTab === 'crew' && (
             <>
-              <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
+              <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek} />
               <CrewReport compact jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
             </>
           )}
@@ -693,7 +708,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
 
       {overlaysEl}
       {view === 'payroll' ? (
-        <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
+        <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek} />
       ) : (
       <div className="dash-main" style={gridVars}>
         {/* 1. To-Do / Lawns */}

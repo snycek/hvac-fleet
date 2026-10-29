@@ -84,7 +84,8 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   const [outlineOn, setOutlineOn] = useState(false); // server has it set up
   const [fitSignal, setFitSignal] = useState(0); // bump → the map zooms to show all zones
   const fitMove = useRef(false);
-  // County lot lines: { ring: [[lat, lng]...], sqFt }, drawn dashed on the map.
+  // County lot lines: { ring: [[lat, lng]...], sqFt }. Not drawn for customers (county lines sit
+  // a few feet off the photo and confused people); saved with the quote for John's inbox map.
   const [lot, setLot] = useState(null);
   const lotLive = useRef(null);
   lotLive.current = lot;
@@ -413,7 +414,6 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             crosshair={outlineOn && !snow}
             onMoveEnd={onMapMoved}
             fitSignal={fitSignal}
-            lot={lot?.ring}
           />
         </div>
 
@@ -432,13 +432,6 @@ export default function QuoteTool({ setPage, initialServiceId }) {
 
           <div className="card" style={{ padding: '18px' }}>
             <h3 style={{ fontSize: '15px', fontWeight: 700, marginBottom: '12px' }}>Your Zones</h3>
-            {lot?.sqFt > 0 && (
-              <p className="lot-size">
-                <span className="lot-swatch" aria-hidden="true" /> Your lot: <b>{formatSqFt(lot.sqFt)}</b>
-                {zones.length > 0 && <> · lawn {Math.min(100, Math.round((totalSqFt / lot.sqFt) * 100))}% of it</>}
-                <small>Dashed line = county property line (can be a few feet off the photo)</small>
-              </p>
-            )}
             {!zones.length && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Zones you draw show up here. You can rename them.</p>}
             <datalist id="zone-names">{ZONE_NAME_SUGGESTIONS.map(n => <option key={n} value={n} />)}</datalist>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

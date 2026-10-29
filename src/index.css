@@ -798,3 +798,40 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .cust-search-list li[aria-selected="true"] { background: var(--bg-elevated); }
 .cust-search-sub { display: flex; gap: 10px; font-size: 12px; margin-top: 2px; color: var(--text-muted); }
 .cust-search-none { color: var(--text-muted); cursor: default; }
+
+/* ---- Owner Hub on phones: one section per tab, bottom tab bar ---- */
+.phone-hub { display: flex; flex-direction: column; gap: 10px; padding: 10px 10px calc(78px + env(safe-area-inset-bottom)); }
+.phone-numbers { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; width: 100%; text-align: left; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 13px; color: var(--text-muted); cursor: pointer; }
+.phone-numbers b { color: var(--text-primary); font-size: 15px; }
+.phone-numbers-day { width: 100%; font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.phone-caret { margin-left: auto; }
+.phone-kpis .dash-kpis { display: flex; flex-direction: column; gap: 8px; }
+.phone-kpis .kpi-group { width: 100%; }
+.phone-demo { display: flex; flex-direction: column; gap: 8px; }
+.phone-demo-pill { display: flex; align-items: center; gap: 8px; background: #f0b42912; border: 1px solid #f0b42966; border-radius: 999px; padding: 4px 6px 4px 4px; }
+.phone-demo-pill .demo-play { width: 32px; height: 32px; font-size: 13px; flex-shrink: 0; }
+.phone-demo-sum { flex: 1; min-width: 0; text-align: left; background: none; border: none; font: inherit; font-size: 12.5px; font-weight: 700; color: #f0b429; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone-demo-event { color: var(--text-muted); font-weight: 600; }
+.phone-demo-exit { padding: 3px 9px; font-size: 12px; }
+.phone-demo .demo-bar .demo-play { display: none; } /* the pill already has play/pause */
+.phone-demo-start { align-self: flex-end; padding: 5px 12px; font-size: 12px; }
+.phone-card { background: var(--bg-card, #161b22); border: 1px solid var(--border); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.phone-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 700; font-size: 14px; }
+.phone-toggle { background: none; border: none; padding: 0; font: inherit; font-weight: 700; font-size: 14px; color: var(--text-primary); cursor: pointer; width: 100%; text-align: left; }
+.phone-map { position: relative; height: 55vh; min-height: 300px; border-radius: 10px; overflow: hidden; }
+.phone-map > div { position: absolute; inset: 0; }
+.phone-activity { max-height: 50vh; overflow: auto; }
+.phone-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.phone-body .dash-panel { height: auto; max-height: none; }
+.phone-body .dash-panel .dash-panel-body { max-height: 60vh; overflow: auto; } /* long lists (P/L payments) scroll inside */
+.phone-tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 900; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--bg-card, #161b22); border-top: 1px solid var(--border); padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); }
+.phone-tabs button { display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: none; font: inherit; font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 4px 0; cursor: pointer; }
+.phone-tabs button[aria-current="page"] { color: var(--accent-teal); }
+.phone-tab-icon { position: relative; font-size: 20px; line-height: 1; }
+.phone-tab-badge { position: absolute; top: -6px; left: 14px; background: #f0b429; color: #111; border-radius: 999px; font-size: 10px; font-weight: 800; padding: 0 5px; line-height: 16px; min-width: 16px; text-align: center; }
+@media (max-width: 760px) {
+  /* /demo banner: brand + "Real site" on one row, the note under them */
+  .demo-link-bar { padding: 8px 12px; gap: 4px 10px; }
+  .demo-link-note { order: 3; width: 100%; font-size: 12px; }
+  .demo-link-login { padding: 4px 10px; font-size: 12px; }
+}

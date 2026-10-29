@@ -21,6 +21,8 @@ function BillingPanel({ jobs, today, settings, onSaveSettings, onSend, onPrint, 
   const [busy, setBusy] = useState('');
   const [done, setDone] = useState('');
   const [confirm, setConfirm] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const PREVIEW = 25; // long months: first 25, then "Show all"
 
   const statements = useMemo(() => statementsFor(jobs, shown, today, settings, { assumeSentBefore }), [jobs, shown, today, settings, assumeSentBefore]);
   const buckets = useMemo(() => aging(jobs, today, settings), [jobs, today, settings]);
@@ -124,7 +126,7 @@ function BillingPanel({ jobs, today, settings, onSaveSettings, onSend, onPrint, 
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {list.length === 0 && <div className="cust-empty">{statements.length ? 'Nothing matches.' : `No monthly visits in ${periodLabel(shown)}.`}</div>}
-        {list.map((st, i) => {
+        {(showAll ? list : list.slice(0, PREVIEW)).map((st, i) => {
           const s = STATUS[st.status];
           const m = CONTACT_METHODS[st.reach];
           return (
@@ -154,6 +156,11 @@ function BillingPanel({ jobs, today, settings, onSaveSettings, onSend, onPrint, 
           );
         })}
       </div>
+      {list.length > PREVIEW && (
+        <button type="button" className="btn-ghost" onClick={() => setShowAll(s => !s)} style={{ alignSelf: 'flex-start', padding: '6px 12px', fontSize: '12px' }}>
+          {showAll ? 'Show less' : `Show all ${list.length}`}
+        </button>
+      )}
     </div>
   );
 }

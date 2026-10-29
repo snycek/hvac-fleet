@@ -24,6 +24,7 @@ import PayrollView from '../components/PayrollView.jsx';
 import PrintInvoices from '../components/PrintInvoices.jsx';
 import CustomerCard from '../components/CustomerCard.jsx';
 import CustomerSearch from '../components/CustomerSearch.jsx';
+import { useIsPhone } from '../hooks/useIsPhone.js';
 import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { COMPANY_INFO } from '../data/services.js';
@@ -102,6 +103,12 @@ export default function OwnerView({ demoOnly = false } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoOnly]);
   const [leftTab, setLeftTab] = useState('todo');
+  // Phones: one section per screen, picked from a bottom tab bar.
+  const isPhone = useIsPhone();
+  const [phoneTab, setPhoneTab] = useState('today');
+  const [phoneNumbers, setPhoneNumbers] = useState(false); // slim numbers line opened up
+  const [phoneDemo, setPhoneDemo] = useState(false);       // demo controls opened up
+  const [phoneActivity, setPhoneActivity] = useState(false);
   const [view, setView] = useState('hub'); // 'hub' | 'payroll'
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [printing, setPrinting] = useState(null); // { title, items } for the invoice preview
@@ -348,6 +355,190 @@ export default function OwnerView({ demoOnly = false } = {}) {
     background: on ? 'var(--accent-teal)22' : 'transparent', color: on ? 'var(--accent-teal)' : 'var(--text-muted)',
   });
 
+  // ---- Pieces shared by the desktop grid and the phone layout ----
+  const kpisEl = (
+      <div className={`dash-kpis view-${view}`}>
+        {kpiGroups.map(g => (
+          <div key={g.title} className={g.title === 'Crew' ? 'kpi-group kpi-crew' : 'kpi-group'} style={{ flexGrow: g.tiles.length }}>
+            <div className="kpi-group-title">{g.title}</div>
+            <div className="kpi-row" style={{ gridTemplateColumns: `repeat(${g.tiles.length}, minmax(0, 1fr))` }}>
+              {g.tiles.map(k => <Kpi key={k.label} {...k} />)}
+            </div>
+          </div>
+        ))}
+      </div>
+  );
+  const demoBarEl = (
+      <div className="demo-bar">
+        <button type="button" onClick={sim.playing ? sim.pause : sim.play} aria-label={sim.playing ? 'Pause demo' : 'Play demo'}
+          className="demo-play" style={{ background: sim.playing ? '#e67e22' : '#3fb950' }}>
+          {sim.playing ? '⏸' : '▶'}
+        </button>
+        <div style={{ lineHeight: 1.25 }}>
+          <div style={{ fontWeight: 700, fontSize: '13px' }}>{formatDay(sim.date)} · Week {sim.week}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Demo · ZIP 48101 · {sim.playing ? 'running' : 'paused'}{sim.cleared ? ' · fresh books' : ''}</div>
+        </div>
+        <span className="demo-sep" />
+        <div style={seg} role="group" aria-label="Trucks">
+          <button type="button" aria-label="Fewer trucks" disabled={sim.truckCount <= 1} onClick={() => sim.setTruckCount(sim.truckCount - 1)} style={{ ...segBtn(false), opacity: sim.truckCount <= 1 ? 0.35 : 1 }}>−</button>
+          <span style={{ fontSize: '12px', fontWeight: 700, padding: '0 6px', whiteSpace: 'nowrap' }} title="Trucks running (16 lawns each per day)">🚜 {sim.truckCount} truck{sim.truckCount === 1 ? '' : 's'}</span>
+          <button type="button" aria-label="More trucks" disabled={sim.truckCount >= sim.maxTrucks} onClick={() => sim.setTruckCount(sim.truckCount + 1)} style={{ ...segBtn(false), opacity: sim.truckCount >= sim.maxTrucks ? 0.35 : 1 }}>+</button>
+        </div>
+        <div style={seg} role="group" aria-label="Demo speed">
+          {SPEEDS.map(s => <button key={s} type="button" aria-pressed={sim.speed === s} onClick={() => sim.setSpeed(s)} style={segBtn(sim.speed === s)}>{s}×</button>)}
+        </div>
+        <span style={{ fontSize: '12px', fontWeight: 600, color: '#58a6ff', whiteSpace: 'nowrap' }} title={sim.winter ? 'Demo winter (Dec–Mar): mowers parked; it snows about 1 workday in 3 and the plows roll at 4 AM.' : 'Demo weather: showers every 5th workday. Each foreman decides when to put their own truck on Rain Delay.'}>
+          {sim.winter
+            ? (sim.snowDay ? '❄️ Snow today · plows out' : '☁️ No snow · plows parked')
+            : sim.rainDay ? '🌧 Showers likely today' : `☀️ Dry · showers in ${sim.daysUntilRain} day${sim.daysUntilRain === 1 ? '' : 's'}`}
+        </span>
+        <button type="button" className="btn-ghost demo-action" onClick={sim.winter ? sim.jumpToSpring : sim.jumpToWinter}
+          title={sim.winter ? 'Back to mowing season' : 'Jump the demo to December: mowers park, plow trucks work snow days'}>
+          {sim.winter ? '🌱 Mowing season' : '❄️ Jump to winter'}
+        </button>
+        <span style={{ flex: 1 }} />
+        {sim.lastEvent && (
+          <span key={sim.lastEvent + sim.cutToday} className="pl-flash demo-event">{sim.lastEvent}</span>
+        )}
+        <span className="demo-sep" />
+        <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
+        <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
+        {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
+      </div>
+  );
+  const overlaysEl = (
+    <>
+      {customerKey && (
+        <CustomerCard
+          customerKey={customerKey} jobs={allJobs} payments={payments} today={today} settings={settings}
+          onClose={() => setCustomerKey(null)}
+          onRemind={() => remindAccounts([openAccount(customerKey)])}
+          onPrint={() => { const a = openAccount(customerKey); if (a.jobs.length) printBillFor(a.jobs[a.jobs.length - 1]); }}
+          onUpdate={updateCustomer}
+        />
+      )}
+      {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
+    </>
+  );
+  const todoProps = {
+    jobs: allJobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense,
+    remindCustomer, today, remindAccounts, openCustomer, planRoutes, printInvoice: printBillFor,
+    settings, statementsReady,
+    onOpenBilling: () => (isPhone ? setPhoneTab('money') : setLeftTab('billing')),
+    onOpenQuotes: () => (isPhone ? setPhoneTab('todo') : setLeftTab('quotes')),
+    promiseCheck: demoOn ? sim.promiseCheck : live.promiseCheck, settleCheck: demoOn ? sim.settleCheck : live.settleCheck,
+  };
+  const routeTechList = demoOn ? technicians.filter(t => t.status !== 'offline') : technicians;
+  const mapEl = (
+    <FleetMap
+      key={demoOn ? 'demo' : 'live'}
+      technicians={mapTechs}
+      jobs={jobs}
+      selectedTechId={selectedTechId}
+      {...(demoOn ? { lawns: sim.lawns, bursts: sim.bursts, fitBounds: sim.bounds, outline: sim.outline, lots: sim.lots, snowing: sim.snowDay } : {})}
+      onPickCustomer={key => setCustomerKey(key)}
+    />
+  );
+
+  // ---- Phone: slim numbers line, demo pill, one section per tab, bottom tab bar ----
+  if (isPhone) {
+    const PHONE_TABS = [
+      { id: 'today', icon: '🏠', label: 'Today' },
+      { id: 'todo', icon: '📥', label: 'To-Do', badge: todoCount },
+      { id: 'money', icon: '💵', label: 'Money', badge: statementsReady ? statementsReady.count : 0 },
+      { id: 'customers', icon: '👥', label: 'Customers' },
+      { id: 'crew', icon: '👷', label: 'Crew' },
+    ];
+    const go = id => { setPhoneTab(id); document.querySelector('.dash-shell-main')?.scrollTo(0, 0); };
+    return (
+      <div className="owner-dash phone-hub">
+        <button type="button" className="phone-numbers" aria-expanded={phoneNumbers} onClick={() => setPhoneNumbers(o => !o)}>
+          <span className="phone-numbers-day">{formatDay(today)}</span>
+          <span><b>{stats.cutToday}/{stats.totalToday}</b> cut</span>
+          <span><b>{money(stats.billedToday)}</b> earned</span>
+          <span><b style={{ color: '#3fb950' }}>{money(stats.collectedToday)}</b> in</span>
+          <span className="phone-caret">{phoneNumbers ? '▾' : '▸'}</span>
+        </button>
+        {phoneNumbers && <div className="phone-kpis">{kpisEl}</div>}
+
+        {demoOn && (
+          <div className="phone-demo">
+            <div className="phone-demo-pill">
+              <button type="button" onClick={sim.playing ? sim.pause : sim.play} aria-label={sim.playing ? 'Pause demo' : 'Play demo'}
+                className="demo-play" style={{ background: sim.playing ? '#e67e22' : '#3fb950' }}>{sim.playing ? '⏸' : '▶'}</button>
+              <button type="button" className="phone-demo-sum" aria-expanded={phoneDemo} onClick={() => setPhoneDemo(o => !o)}>
+                🎬 Demo · {sim.speed}× · {sim.truckCount} truck{sim.truckCount === 1 ? '' : 's'}{sim.lastEvent ? <span className="phone-demo-event"> · {sim.lastEvent}</span> : null} {phoneDemo ? '▾' : '▸'}
+              </button>
+              {!demoOnly && <button type="button" className="btn-ghost phone-demo-exit" onClick={toggleDemo} aria-label="Exit demo">✕</button>}
+            </div>
+            {phoneDemo && demoBarEl}
+          </div>
+        )}
+        {!demoOn && !demoOnly && (
+          <button type="button" className="btn-ghost phone-demo-start" onClick={toggleDemo}>🎬 Demo</button>
+        )}
+
+        {overlaysEl}
+
+        <div className="phone-body">
+          {phoneTab === 'today' && (
+            <>
+              <section className="phone-card">
+                <div className="phone-card-head">🚜 Routes today <span className="dash-head-note">{stats.cutToday}/{stats.totalToday} cut · {stats.leftToday} left</span></div>
+                <TruckRoutes jobs={jobs} technicians={routeTechList} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} />
+              </section>
+              <section className="phone-card">
+                <div className="phone-card-head">🗺️ Live map {stats.onRain > 0 && <span style={{ color: '#58a6ff', fontSize: '12px' }}>🌧 {stats.onRain} on rain delay</span>}</div>
+                <div className="phone-map">{mapEl}</div>
+                <div className="dash-panel-foot"><Legend /></div>
+              </section>
+              <section className="phone-card">
+                <button type="button" className="phone-card-head phone-toggle" aria-expanded={phoneActivity} onClick={() => setPhoneActivity(o => !o)}>
+                  ⚡ Live activity <span className="dash-head-note">{phoneActivity ? 'hide' : 'show'} {phoneActivity ? '▾' : '▸'}</span>
+                </button>
+                {phoneActivity && <div className="phone-activity"><ActivityFeed jobs={jobs} expenses={expenses} technicians={technicians} delays={delays} shifts={shifts} payments={payments} today={today} /></div>}
+              </section>
+            </>
+          )}
+          {phoneTab === 'todo' && (
+            <section className="phone-card"><OwnerTodo bare {...todoProps} /></section>
+          )}
+          {phoneTab === 'money' && (
+            <>
+              <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} />
+              <section className="phone-card">
+                <div className="phone-card-head">💵 Billing</div>
+                <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
+                  onSend={sendStatements} onPrint={printStatements} openCustomer={key => setCustomerKey(key)} assumeSentBefore={assumeSentBefore} />
+              </section>
+            </>
+          )}
+          {phoneTab === 'customers' && (
+            <section className="phone-card">
+              <CustomerSearch jobs={allJobs} onPick={key => setCustomerKey(key)} />
+              <LawnsPanel bare jobs={jobs} markPaid={markPaid} today={today} settings={settings} openCustomer={key => setCustomerKey(key)} />
+            </section>
+          )}
+          {phoneTab === 'crew' && (
+            <>
+              <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
+              <CrewReport compact jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
+            </>
+          )}
+        </div>
+
+        <nav className="phone-tabs" aria-label="Owner Hub sections">
+          {PHONE_TABS.map(tb => (
+            <button key={tb.id} type="button" aria-current={phoneTab === tb.id ? 'page' : undefined} onClick={() => go(tb.id)}>
+              <span className="phone-tab-icon">{tb.icon}{tb.badge ? <span className="phone-tab-badge">{tb.badge > 99 ? '99+' : tb.badge}</span> : null}</span>
+              <span>{tb.label}</span>
+            </button>
+          ))}
+        </nav>
+      </div>
+    );
+  }
+
   return (
     <div className="owner-dash">
       {/* Title + grouped numbers */}
@@ -361,16 +552,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           </div>
         </div>
         {/* On phones/tablets the Crew numbers live on the Crew & Payroll tab, not the Hub. */}
-        <div className={`dash-kpis view-${view}`}>
-          {kpiGroups.map(g => (
-            <div key={g.title} className={g.title === 'Crew' ? 'kpi-group kpi-crew' : 'kpi-group'} style={{ flexGrow: g.tiles.length }}>
-              <div className="kpi-group-title">{g.title}</div>
-              <div className="kpi-row" style={{ gridTemplateColumns: `repeat(${g.tiles.length}, minmax(0, 1fr))` }}>
-                {g.tiles.map(k => <Kpi key={k.label} {...k} />)}
-              </div>
-            </div>
-          ))}
-        </div>
+        {kpisEl}
         {!demoOnly && (
           <button type="button" className="btn-ghost" onClick={toggleDemo} aria-pressed={demoOn}
             style={{ padding: '7px 13px', fontSize: '13px', ...(demoOn ? { color: '#f0b429', borderColor: '#f0b42977', background: '#f0b42914' } : {}) }}>
@@ -380,55 +562,9 @@ export default function OwnerView({ demoOnly = false } = {}) {
       </div>
 
       {/* Demo controls */}
-      {demoOn && (
-        <div className="demo-bar">
-          <button type="button" onClick={sim.playing ? sim.pause : sim.play} aria-label={sim.playing ? 'Pause demo' : 'Play demo'}
-            className="demo-play" style={{ background: sim.playing ? '#e67e22' : '#3fb950' }}>
-            {sim.playing ? '⏸' : '▶'}
-          </button>
-          <div style={{ lineHeight: 1.25 }}>
-            <div style={{ fontWeight: 700, fontSize: '13px' }}>{formatDay(sim.date)} · Week {sim.week}</div>
-            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Demo · ZIP 48101 · {sim.playing ? 'running' : 'paused'}{sim.cleared ? ' · fresh books' : ''}</div>
-          </div>
-          <span className="demo-sep" />
-          <div style={seg} role="group" aria-label="Trucks">
-            <button type="button" aria-label="Fewer trucks" disabled={sim.truckCount <= 1} onClick={() => sim.setTruckCount(sim.truckCount - 1)} style={{ ...segBtn(false), opacity: sim.truckCount <= 1 ? 0.35 : 1 }}>−</button>
-            <span style={{ fontSize: '12px', fontWeight: 700, padding: '0 6px', whiteSpace: 'nowrap' }} title="Trucks running (16 lawns each per day)">🚜 {sim.truckCount} truck{sim.truckCount === 1 ? '' : 's'}</span>
-            <button type="button" aria-label="More trucks" disabled={sim.truckCount >= sim.maxTrucks} onClick={() => sim.setTruckCount(sim.truckCount + 1)} style={{ ...segBtn(false), opacity: sim.truckCount >= sim.maxTrucks ? 0.35 : 1 }}>+</button>
-          </div>
-          <div style={seg} role="group" aria-label="Demo speed">
-            {SPEEDS.map(s => <button key={s} type="button" aria-pressed={sim.speed === s} onClick={() => sim.setSpeed(s)} style={segBtn(sim.speed === s)}>{s}×</button>)}
-          </div>
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#58a6ff', whiteSpace: 'nowrap' }} title={sim.winter ? 'Demo winter (Dec–Mar): mowers parked; it snows about 1 workday in 3 and the plows roll at 4 AM.' : 'Demo weather: showers every 5th workday. Each foreman decides when to put their own truck on Rain Delay.'}>
-            {sim.winter
-              ? (sim.snowDay ? '❄️ Snow today · plows out' : '☁️ No snow · plows parked')
-              : sim.rainDay ? '🌧 Showers likely today' : `☀️ Dry · showers in ${sim.daysUntilRain} day${sim.daysUntilRain === 1 ? '' : 's'}`}
-          </span>
-          <button type="button" className="btn-ghost demo-action" onClick={sim.winter ? sim.jumpToSpring : sim.jumpToWinter}
-            title={sim.winter ? 'Back to mowing season' : 'Jump the demo to December: mowers park, plow trucks work snow days'}>
-            {sim.winter ? '🌱 Mowing season' : '❄️ Jump to winter'}
-          </button>
-          <span style={{ flex: 1 }} />
-          {sim.lastEvent && (
-            <span key={sim.lastEvent + sim.cutToday} className="pl-flash demo-event">{sim.lastEvent}</span>
-          )}
-          <span className="demo-sep" />
-          <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
-          <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
-          {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
-        </div>
-      )}
+      {demoOn && demoBarEl}
 
-      {customerKey && (
-        <CustomerCard
-          customerKey={customerKey} jobs={allJobs} payments={payments} today={today} settings={settings}
-          onClose={() => setCustomerKey(null)}
-          onRemind={() => remindAccounts([openAccount(customerKey)])}
-          onPrint={() => { const a = openAccount(customerKey); if (a.jobs.length) printBillFor(a.jobs[a.jobs.length - 1]); }}
-          onUpdate={updateCustomer}
-        />
-      )}
-      {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
+      {overlaysEl}
       {view === 'payroll' ? (
         <PayrollView technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} />
       ) : (
@@ -456,15 +592,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
               ) : leftTab === 'todo' ? (
                 <OwnerTodo
                   bare hideQuotes
-                  jobs={allJobs} technicians={technicians} expenses={expenses}
-                  scheduleJob={scheduleJob} declineJob={declineJob} markPaid={markPaid}
-                  logExpense={logExpense} rejectExpense={rejectExpense}
-                  remindCustomer={remindCustomer} today={today}
-                  remindAccounts={remindAccounts} openCustomer={openCustomer} planRoutes={planRoutes}
-                  printInvoice={printBillFor}
-                  settings={settings} statementsReady={statementsReady}
-                  onOpenBilling={() => setLeftTab('billing')} onOpenQuotes={() => setLeftTab('quotes')}
-                  promiseCheck={demoOn ? sim.promiseCheck : live.promiseCheck} settleCheck={demoOn ? sim.settleCheck : live.settleCheck}
+                  {...todoProps}
                 />
               ) : leftTab === 'billing' ? (
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}

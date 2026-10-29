@@ -38,9 +38,11 @@ function distanceTo(ring, { lat, lng }) {
   return inside ? 0 : best;
 }
 
-// "15617 Moore Rd, Allen Park, MI" → { num: '15617', street: 'MOORE' }
+// "15617 Moore Rd, Allen Park, MI" → { num: '15617', street: 'MOORE' }. The direction
+// ("N" or "North", as the address picker spells it out) is skipped: the county writes "14640 N YOST".
 function addressParts(address) {
-  const m = String(address || '').toUpperCase().match(/^\s*(\d+)\s+(?:[NSEW]\.?\s+)?([A-Z0-9]+)/);
+  const m = String(address || '').toUpperCase()
+    .match(/^\s*(\d+)\s+(?:(?:NORTH|SOUTH|EAST|WEST|[NSEW])\.?\s+(?=[A-Z0-9]))?([A-Z0-9']+)/);
   return m ? { num: m[1], street: m[2] } : null;
 }
 const sameAddress = (parcelAddress, want) => {
@@ -71,7 +73,7 @@ export async function findLot({ lat, lng, address = '' }) {
     if (!byAddress && want) {
       const wLat = 800 / M_LAT, wLng = 800 / mLng(lat);
       const named = await query({
-        where: `Address LIKE '${want.num} %${want.street}%'`,
+        where: `Address LIKE '${want.num} %${want.street.replace(/'/g, "''")}%'`,
         geometry: `${lng - wLng},${lat - wLat},${lng + wLng},${lat + wLat}`, geometryType: 'esriGeometryEnvelope',
       });
       byAddress = named

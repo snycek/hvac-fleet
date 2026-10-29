@@ -1119,7 +1119,6 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   .quote-sticky span { font-size: 12.5px; color: var(--text-muted); }
   .quote-sticky .btn-primary { padding: 11px 20px; font-size: 15px; }
   .quote-sticky .btn-primary:disabled { opacity: .5; }
-  .quote-next { display: none; }
 }
 
 /* Lot lines (county records) on the quote map */

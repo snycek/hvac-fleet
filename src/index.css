@@ -762,3 +762,17 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .chore-row:first-child { border-top: none; }
 .chore-row:hover, .todo-link:hover { background: var(--bg-elevated); }
 .dash-tabs { flex-wrap: wrap; }
+
+/* Pay page: paying by check */
+.portal-check { color: #6d3fc0; font-weight: 700; }
+.portal-alt { background: none; border: none; color: #1f6b2b; font-weight: 700; font-size: 15px; text-decoration: underline; cursor: pointer; padding: 10px 4px 2px; align-self: center; }
+.portal-checkform { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #e3e6e3; }
+.portal-checkform .portal-pay { flex: 1; font-size: 15px; padding: 12px; }
+.portal-choice { display: flex; flex-direction: column; gap: 8px; font-size: 15px; }
+.portal-choice label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+.portal-input { border: 1px solid #cfd6cf; border-radius: 10px; padding: 11px 12px; font-size: 16px; }
+
+/* Owner: checks on the way */
+.check-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; flex-wrap: wrap; font-size: 13px; }
+.check-row + .check-row { border-top: 1px solid var(--border); }
+.check-badge { color: #a371f7; font-weight: 700; font-size: 12px; }

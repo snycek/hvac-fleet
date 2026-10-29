@@ -117,8 +117,8 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
                   <tr key={p.id}>
                     <td>{stamp(p.at)}</td>
                     <td><b>{usd(p.amount)}</b>{p.visits > 1 ? <span className="cust-dim"> · {p.visits} visits</span> : ''}</td>
-                    <td>{p.card ? '💳' : (METHODS[p.method]?.icon || '')} {methodLabel(p)}</td>
-                    <td>{p.status === 'paid' ? <span className="cust-ok">✓ Received</span> : <span className="cust-bad">❌ Declined · {p.reason}</span>}</td>
+                    <td>{p.card && p.method === 'card' ? '💳' : (METHODS[p.method]?.icon || '')} {methodLabel(p)}</td>
+                    <td>{p.status === 'paid' ? <span className="cust-ok">✓ Received</span> : <span className="cust-bad">❌ {p.method === 'check' ? 'Bounced' : `Declined · ${p.reason}`}</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -182,7 +182,8 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
                     <td>{usd(v.amount)}</td>
                     <td>
                       {v.status === 'paid' && <span className="cust-ok">✓ Paid {day(v.paidAt)}{v.method ? ` · ${METHODS[v.method]?.label.toLowerCase() || v.method}` : ''}</span>}
-                      {v.status === 'open' && (v.late > 0
+                      {v.status === 'open' && v.checkPending && <span className="check-badge">📨 Check coming · {v.checkPending.how === 'crew' ? 'to crew' : 'mailed'} {day(v.checkPending.at)}</span>}
+                      {v.status === 'open' && !v.checkPending && (v.late > 0
                         ? <span className="cust-bad">⚠️ {v.late}d past due</span>
                         : <span className="cust-warn">Open · due {day(v.due)}</span>)}
                       {v.status === 'upcoming' && <span className="cust-dim">Scheduled</span>}

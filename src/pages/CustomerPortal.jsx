@@ -56,8 +56,28 @@ export default function CustomerPortal() {
   if (error) return <Shell><div className="portal-card"><p>{error}</p><Contact /></div></Shell>;
   if (!account) return <Shell><div className="portal-card portal-muted">Opening your account…</div></Shell>;
 
-  const ids = selected ?? account.open.map(l => l.id);
+  // Visits with a check already on the way aren't picked for paying again by default.
+  const ids = selected ?? account.open.filter(l => !l.checkPending).map(l => l.id);
   const toPay = account.open.filter(l => ids.includes(l.id));
+  const onTheWay = account.open.filter(l => l.checkPending);
+
+  // "I'll pay by check": the visits stay open until John gets the check.
+  const promiseCheck = async ({ how, number }) => {
+    const now = new Date().toISOString();
+    if (link.demo) {
+      setAccount(a => ({ ...a, open: a.open.map(l => (ids.includes(l.id) ? { ...l, checkPending: { at: now, how, number } } : l)) }));
+    } else {
+      const res = await fetch(`/api/portal/${encodeURIComponent(link.token)}/check`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobIds: toPay.map(l => l.id), how, number }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not save that. Please call us.');
+      setAccount(a => ({ ...a, ...data.account }));
+    }
+    setReceipt({ check: true, amount, how, number, at: now, count: toPay.length });
+    setSelected(null);
+  };
   const amount = toPay.reduce((s, l) => s + l.amount, 0);
   const first = String(account.customer.name || '').split(' ')[0];
 
@@ -91,7 +111,18 @@ export default function CustomerPortal() {
       <div className="portal-hello">Hi {first} 👋</div>
       <div className="portal-muted">{account.customer.address}</div>
 
-      {receipt && (
+      {receipt?.check && (
+        <div className="portal-card portal-receipt" role="status">
+          <div className="portal-big">📨 Thanks — we'll watch for your check</div>
+          <div className="portal-amount">{usd(receipt.amount)}</div>
+          <div className="portal-muted">
+            {receipt.how === 'crew' ? 'Hand it to your crew on the next visit.' : `Mail it to ${COMPANY_INFO.mailingAddress || 'the address on your invoice'}.`}
+            {' '}Make it out to “{COMPANY_INFO.name}”{receipt.number ? ` · check #${receipt.number}` : ''}.
+          </div>
+          <div className="portal-muted" style={{ fontSize: '12px' }}>We'll mark {receipt.count === 1 ? 'this visit' : `these ${receipt.count} visits`} paid when it arrives. No reminders in the meantime.</div>
+        </div>
+      )}
+      {receipt && !receipt.check && (
         <div className="portal-card portal-receipt" role="status">
           <div className="portal-big">✅ Payment received</div>
           <div className="portal-amount">{usd(receipt.amount)}</div>
@@ -103,6 +134,7 @@ export default function CustomerPortal() {
       <div className="portal-card">
         <div className="portal-label">Balance due</div>
         <div className="portal-amount">{usd(account.balance)}</div>
+        {onTheWay.length > 0 && <div className="portal-muted">📨 {usd(onTheWay.reduce((s, l) => s + l.amount, 0))} of that is covered by a check on the way.</div>}
         {account.open.length === 0 && <div className="portal-good">You're all paid up. Thank you! 🌱</div>}
         {account.open.length > 0 && (
           <>
@@ -113,7 +145,7 @@ export default function CustomerPortal() {
                     <input type="checkbox" checked={ids.includes(l.id)} onChange={e => setSelected(e.target.checked ? [...ids, l.id] : ids.filter(x => x !== l.id))} />
                     <span className="portal-line">
                       <b>{niceDate(l.date)}</b> · {l.service}
-                      {l.pastDue && <span className="portal-pastdue"> · past due</span>}
+                      {l.checkPending ? <span className="portal-check"> · 📨 check on the way</span> : l.pastDue && <span className="portal-pastdue"> · past due</span>}
                       <span className="portal-muted portal-small">Invoice {l.invoiceNo}</span>
                     </span>
                     <span className="portal-line-amt">{usd(l.amount)}</span>
@@ -122,6 +154,7 @@ export default function CustomerPortal() {
               ))}
             </ul>
             {amount > 0 && <PayButton amount={amount} paying={paying} setPaying={setPaying} onPay={pay} demo={link.demo} />}
+            {amount > 0 && <CheckOption amount={amount} onPromise={promiseCheck} />}
           </>
         )}
       </div>
@@ -159,6 +192,38 @@ function PayButton({ amount, paying, setPaying, onPay, demo }) {
       <div className="portal-test">Test mode{demo ? ' (demo)' : ''} — tapping Pay completes the payment right away. No real money moves.</div>
       {err && <div className="portal-error" role="alert">{err}</div>}
       <button type="button" className="portal-pay" disabled={paying} onClick={go}>{paying ? 'Paying…' : `Pay ${usd(amount)}`}</button>
+    </div>
+  );
+}
+
+// Paying by check instead: mail it or hand it to the crew (check number optional).
+function CheckOption({ amount, onPromise }) {
+  const [open, setOpen] = useState(false);
+  const [how, setHow] = useState('mail');
+  const [number, setNumber] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  if (!open) return <button type="button" className="portal-alt" onClick={() => setOpen(true)}>Paying by check instead?</button>;
+  const go = async () => {
+    setErr(''); setBusy(true);
+    try { await onPromise({ how, number: number.trim() }); setOpen(false); setNumber(''); }
+    catch (ex) { setErr(ex.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="portal-checkform">
+      <div className="portal-label">Pay {usd(amount)} by check</div>
+      <div className="portal-choice" role="radiogroup" aria-label="How you'll get it to us">
+        <label><input type="radio" name="how" checked={how === 'mail'} onChange={() => setHow('mail')} /> I'll mail it</label>
+        <label><input type="radio" name="how" checked={how === 'crew'} onChange={() => setHow('crew')} /> I'll hand it to the crew</label>
+      </div>
+      <input className="portal-input" inputMode="numeric" placeholder="Check # (optional)" aria-label="Check number" value={number} onChange={e => setNumber(e.target.value.slice(0, 12))} />
+      <div className="portal-muted portal-small">Make it out to “{COMPANY_INFO.name}”{how === 'mail' && COMPANY_INFO.mailingAddress ? ` and mail to ${COMPANY_INFO.mailingAddress}` : ''}.</div>
+      {err && <div className="portal-error" role="alert">{err}</div>}
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button type="button" className="portal-pay" disabled={busy} onClick={go}>{busy ? 'Saving…' : `I'll send a check for ${usd(amount)}`}</button>
+        <button type="button" className="portal-alt" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
     </div>
   );
 }

@@ -90,6 +90,7 @@ export function statementsFor(jobs, period, today, settings, { assumeSentBefore 
     const status = open === 0 ? 'paid'
       : date > today ? 'upcoming'
       : !sent ? 'unsent'
+      : lines.every(l => l.paid || l.checkPending) ? 'check'
       : today > due ? 'overdue'
       : open < amount ? 'partial'
       : 'sent';
@@ -110,6 +111,7 @@ export const STATUS = {
   sent: { label: 'Sent', color: '#58a6ff' },
   partial: { label: 'Part paid', color: '#58a6ff' },
   overdue: { label: 'Overdue', color: '#ff7b72' },
+  check: { label: 'Check coming', color: '#a371f7' },
   paid: { label: 'Paid', color: '#3fb950' },
 };
 

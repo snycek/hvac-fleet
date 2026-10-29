@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { mockJobs } from './src/data/mockData.js';
 import { mockTechnicians } from './src/data/mockData.js';
 import { suggestAddresses } from './src/lib/addressSuggest.js';
-import { applyPaymentResult, simulateCardCharge, voidPayment } from './src/lib/payments.js';
+import { applyPaymentResult, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from './src/lib/payments.js';
 import { BILLING_DEFAULTS, accountFor, billingSettings, invoiceFor } from './src/lib/invoices.js';
 import { lawnKey } from './src/lib/lawns.js';
 import crypto from 'crypto';
@@ -528,6 +528,24 @@ app.put('/api/jobs/:id/paid', (req, res) => {
   return res.json({ ...jobs.find((j) => j.id === job.id), payment: next.payment });
 });
 
+// ---- Checks on the way ----
+// Owner: a customer called to say a check is coming ({ jobIds, how: mail|crew, number }).
+app.post('/api/checks', (req, res) => {
+  const { jobs: next, check } = promiseCheck(jobs, { jobIds: req.body?.jobIds, how: req.body?.how, number: req.body?.number, by: 'owner' });
+  if (!check) return res.status(400).json({ error: 'Nothing unpaid to cover.' });
+  jobs.splice(0, jobs.length, ...next);
+  res.json(check);
+});
+// Owner: the check arrived (paid by check) or bounced (shows under Payment problems).
+app.post('/api/checks/:id/:outcome', (req, res) => {
+  const { id, outcome } = req.params;
+  if (!['received', 'bounced'].includes(outcome)) return res.status(404).json({ error: 'unknown action' });
+  const next = settleCheck({ jobs, payments, expenses }, id, outcome === 'received');
+  if (!next.payment) return res.status(404).json({ error: 'That check is already settled.' });
+  commitBooks(next);
+  res.json({ payment: next.payment });
+});
+
 // ---- Payments received ----
 app.get('/api/payments', (_req, res) => res.json(payments));
 
@@ -997,6 +1015,22 @@ app.get('/api/portal/:token', (req, res) => {
   const job = key && jobForKey(key);
   if (!job) return res.status(404).json({ error: "We couldn't find that account. Call us and we'll sort it out." });
   res.json({ ...accountFor(jobs, job, undefined, billing), company: 'johns' });
+});
+
+// Customer: "I'll pay by check" (mailing it or handing it to the crew). The visits stay
+// unpaid until John marks the check received; reminders hold off meanwhile.
+app.post('/api/portal/:token/check', (req, res) => {
+  const key = readToken(req.params.token);
+  const job = key && jobForKey(key);
+  if (!job) return res.status(404).json({ error: "We couldn't find that account." });
+  const open = accountFor(jobs, job, undefined, billing).open.filter((l) => !l.checkPending);
+  const wanted = Array.isArray(req.body?.jobIds) ? req.body.jobIds : open.map((l) => l.id);
+  const ids = open.filter((l) => wanted.includes(l.id)).map((l) => l.id);
+  if (!ids.length) return res.status(400).json({ error: 'Nothing left to pay — thank you!' });
+  const { jobs: next, check } = promiseCheck(jobs, { jobIds: ids, how: req.body?.how, number: req.body?.number, by: 'customer' });
+  jobs.splice(0, jobs.length, ...next);
+  console.log(`[CHECK] ${job.clientName} says a check is coming (${check.how}) for $${check.amount}`);
+  res.json({ check, account: accountFor(jobs, job, undefined, billing) });
 });
 
 // Customer pays open invoices by card (test processor for now — only the last 4 digits

@@ -440,6 +440,7 @@ export default function OwnerView() {
                   printInvoice={printBillFor}
                   settings={settings} statementsReady={statementsReady}
                   onOpenBilling={() => setLeftTab('billing')} onOpenQuotes={() => setLeftTab('quotes')}
+                  promiseCheck={demoOn ? sim.promiseCheck : live.promiseCheck} settleCheck={demoOn ? sim.settleCheck : live.settleCheck}
                 />
               ) : leftTab === 'billing' ? (
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}

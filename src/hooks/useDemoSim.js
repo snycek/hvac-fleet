@@ -5,7 +5,7 @@ import { addDays, todayString } from '../lib/dates.js';
 import { lawnKey } from '../lib/lawns.js';
 import { estimatePrice } from '../lib/zones.js';
 import { bestInsertion, rankRoutes } from '../lib/routeFit.js';
-import { applyPaymentResult, simulateCardCharge, voidPayment } from '../lib/payments.js';
+import { applyPaymentResult, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from '../lib/payments.js';
 
 // Owner demo: two trucks working ZIP 48101 on a weekly cycle (Mon–Fri, 16 lawns
 // per truck per day). Each truck drives real road paths "En Route", switches to
@@ -434,9 +434,24 @@ function demoQuote(i, weekStart) {
 
 // The demo starts on the Monday of the week holding the 1st of this month
 // (or the first Monday of winter, when the owner jumps to winter).
+// Checks take a few days to show up: a check "sent" this many days ago is still on the way.
+const CHECK_DAYS = 2;
+const checkHowFor = key => (hash(`${key}#`) % 3 === 0 ? 'crew' : 'mail');
+const checkNoFor = key => String(1000 + (hash(`${key}$`) % 9000));
+function checksStillComing(jobs, today) {
+  let out = jobs;
+  for (const j of jobs) {
+    if (!j.paid || j.paymentMethod !== 'check' || String(j.paidAt).slice(0, 10) < addDays(today, -CHECK_DAYS)) continue;
+    const back = out.map(x => (x.id === j.id ? { ...x, paid: false, paidAt: null, paymentMethod: null } : x));
+    out = promiseCheck(back, { jobIds: [j.id], how: checkHowFor(j.id), number: checkNoFor(j.id), at: j.paidAt }).jobs;
+  }
+  return out;
+}
+
 function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), start = springStart()) {
   const weekStart = mondayOf(start);
-  const past = withHistory ? history(weekStart, trucks) : { jobs: [], expenses: [], delays: [], shifts: [] };
+  const raw = withHistory ? history(weekStart, trucks) : { jobs: [], expenses: [], delays: [], shifts: [] };
+  const past = { ...raw, jobs: checksStillComing(raw.jobs, weekStart) };
   return {
     truckCount: trucks,
     start,
@@ -512,6 +527,10 @@ export function useDemoSim() {
           if (j.status !== 'completed' || j.paid || !j.payOn || j.payOn > next) continue;
           const when = iso(at(next, 9, 5 + (hash(j.id) % 50)));
           const method = payMethodFor(j.id);
+          if (method === 'check') {
+            if (!j.checkPending) books = { ...books, jobs: promiseCheck(books.jobs, { jobIds: [j.id], how: checkHowFor(j.id), number: checkNoFor(j.id), at: when }).jobs };
+            continue;
+          }
           let result;
           if (method === 'card') {
             const fails = declinesFirst(j.id) && !j.paymentIssue;
@@ -526,6 +545,13 @@ export function useDemoSim() {
             // They fix their card; try again in 2 days.
             books.jobs = books.jobs.map(x => (x.id === j.id ? { ...x, payOn: addDays(next, 2) } : x));
           }
+        }
+        // Checks that have been on the way a few days arrive (John deposits them).
+        const arrived = [...new Set(books.jobs.filter(x => x.checkPending && !x.paid && String(x.checkPending.at).slice(0, 10) <= addDays(next, -CHECK_DAYS)).map(x => x.checkPending.id))];
+        for (const id of arrived) {
+          const amt = books.jobs.filter(x => x.checkPending?.id === id).reduce((s, x) => s + (x.earnings || 0), 0);
+          books = settleCheck(books, id, true, iso(at(next, 11)));
+          paidCount++; paidSum += amt;
         }
         jobs = books.jobs;
         expenses = books.expenses;
@@ -699,6 +725,20 @@ export function useDemoSim() {
     return { sent: items.length };
   }, []);
 
+  // Checks: the owner notes one is coming, or marks it received / bounced (demo calendar).
+  const promiseCheckDemo = useCallback(async (jobIds, how = 'mail', number = '') => {
+    const w = worldRef.current;
+    const { jobs, check } = promiseCheck(w.jobs, { jobIds, how, number, by: 'owner', at: demoNow() });
+    if (!check) throw new Error('Nothing unpaid to cover.');
+    commitWorld({ ...w, jobs });
+  }, [commitWorld]);
+  const settleCheckDemo = useCallback(async (checkId, received) => {
+    const w = worldRef.current;
+    const next = settleCheck({ jobs: w.jobs, payments: w.payments || [], expenses: w.expenses }, checkId, received, demoNow());
+    if (!next.payment) throw new Error('That check is already settled.');
+    commitWorld({ ...w, jobs: next.jobs, payments: next.payments, expenses: next.expenses });
+  }, [commitWorld]);
+
   // Monthly statements: items [{ jobIds, period, periodLabel, channel, message }] — logged
   // on every visit they cover, stamped on the demo calendar.
   const sendStatements = useCallback(async (items) => {
@@ -861,6 +901,8 @@ export function useDemoSim() {
     remindCustomers,
     sendStatements,
     updateCustomer,
+    promiseCheck: promiseCheckDemo,
+    settleCheck: settleCheckDemo,
     start: world.start,
     planRoutes,
     scheduleQuote,

@@ -4,6 +4,7 @@ import { addDays } from './dates.js';
 import { serviceDate } from './invoices.js';
 import { emailOf } from './billing.js';
 import { pastDueCustomers } from './customers.js';
+import { pendingChecks } from './payments.js';
 
 // Things that aren't urgent but shouldn't be forgotten: customers we can't send a bill
 // to (no phone or email), and quote requests nobody has answered in a week.
@@ -22,7 +23,9 @@ export function todoCount({ jobs, expenses, today, settings, statementsReady, hi
   return (hideQuotes ? (quotes ? 1 : 0) : quotes)
     + expenses.filter(e => e.status === 'pending').length
     + (statementsReady ? 1 : 0)
-    + pastDueCustomers(jobs, today, 1, settings).length
+    // Past-due accounts whose whole balance has a check on the way are counted once, under checks.
+    + pastDueCustomers(jobs, today, 1, settings).filter(c => !c.checkCoversAll).length
+    + pendingChecks(jobs).length
     + jobs.filter(j => j.status === 'completed' && !j.paid && j.paymentIssue).length
     + chores.noContact.length + chores.staleQuotes.length;
 }

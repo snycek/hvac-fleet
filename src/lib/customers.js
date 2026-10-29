@@ -44,6 +44,7 @@ export function customerHistory({ jobs, payments = [], key, today, settings }) {
     age: j.status === 'completed' && !j.paid ? days(serviceDate(j), today) : null,
     due: j.status === 'completed' && !j.paid ? dueDateFor(j, settings) : null,
     late: daysPastDue(j, today, settings), // days past its due date (0 = not late)
+    checkPending: !j.paid && j.checkPending ? j.checkPending : null,
   }));
   const open = visits.filter(v => v.status === 'open');
 
@@ -63,7 +64,7 @@ export function customerHistory({ jobs, payments = [], key, today, settings }) {
   }
   const declines = payments
     .filter(p => p.status === 'failed' && p.jobIds?.some(id => ids.has(id)))
-    .map(p => ({ id: p.id, at: p.at, amount: p.amount, visits: p.jobIds.length, status: 'declined', method: 'card', card: `${p.brand} ••${p.last4}`, reason: p.reason }));
+    .map(p => ({ id: p.id, at: p.at, amount: p.amount, visits: p.jobIds.length, status: 'declined', method: p.method || 'card', card: p.method === 'check' ? `Check${p.last4 ? ` #${p.last4}` : ''}` : `${p.brand} ••${p.last4}`, reason: p.reason }));
   const paymentRows = [...byPayment.values(), ...declines].sort((a, b) => String(b.at).localeCompare(String(a.at)));
 
   // Property: the areas they outlined when they asked for a quote (kept on every repeat cut).
@@ -142,6 +143,9 @@ export function pastDueCustomers(jobs, today, minDays = 1, settings) {
       jobs: open,
       balance: open.reduce((s, j) => s + (j.earnings || 0), 0),
       overdue: open.filter((_, i) => late[i] > 0).reduce((s, j) => s + (j.earnings || 0), 0),
+      // A check they said is coming (covers some or all of the open balance).
+      check: open.find(j => j.checkPending)?.checkPending || null,
+      checkCoversAll: open.every(j => j.checkPending),
       oldestDays: oldest,
       oldestDate: serviceDate(open[0]),
       lastReminder: last || null,

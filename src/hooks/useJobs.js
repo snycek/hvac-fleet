@@ -239,5 +239,23 @@ export function useJobs() {
     if (Array.isArray(fresh)) setJobs(fresh);
   }, []);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer };
+  // Checks on the way: the owner notes one (customer called), then marks it received or bounced.
+  const reloadJobs = useCallback(async () => {
+    const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
+    if (Array.isArray(fresh)) setJobs(fresh);
+  }, []);
+  const promiseCheck = useCallback(async (jobIds, how = 'mail', number = '') => {
+    const res = await fetch('/api/checks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobIds, how, number }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save (HTTP ${res.status})`);
+    await reloadJobs();
+  }, [reloadJobs]);
+  const settleCheck = useCallback(async (checkId, received) => {
+    const res = await fetch(`/api/checks/${encodeURIComponent(checkId)}/${received ? 'received' : 'bounced'}`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save (HTTP ${res.status})`);
+    await reloadJobs();
+  }, [reloadJobs]);
+
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck };
 }

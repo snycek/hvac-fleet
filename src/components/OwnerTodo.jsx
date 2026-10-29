@@ -3,7 +3,7 @@ import QuoteInbox from './QuoteInbox.jsx';
 import { receiptUrl } from '../hooks/useExpenses.js';
 import { MANUAL_EXPENSE_TYPES, lawnKey, expenseType, money, reminderMessage, shortDate } from '../lib/lawns.js';
 import { COMPANY_INFO } from '../data/services.js';
-import { METHODS, TEST_CARDS } from '../lib/payments.js';
+import { CHECK_HOW, METHODS, TEST_CARDS, pendingChecks } from '../lib/payments.js';
 import { REMIND_GAP_DAYS, contactsFor, nextReminderDate, pastDueCustomers } from '../lib/customers.js';
 import { daysPastDue, dueDateFor } from '../lib/invoices.js';
 import { monthName } from '../lib/billing.js';
@@ -72,7 +72,21 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck }) {
+  // Checks customers said are on the way: John marks each received (paid) or bounced.
+  const checks = pendingChecks(jobs);
+  const [settling, setSettling] = useState(null);
+  const [checkNote, setCheckNote] = useState('');
+  const [showAllChecks, setShowAllChecks] = useState(false);
+  const settle = async (check, received) => {
+    if (!received && !window.confirm(`Mark ${check.clientName}'s check for ${money(check.amount)} as bounced? It moves to Payment problems.`)) return;
+    setSettling(check.id); setCheckNote('');
+    try {
+      await settleCheck(check.id, received);
+      setCheckNote(received ? `✓ ${check.clientName}: ${money(check.amount)} paid by check` : `${check.clientName}'s check marked bounced`);
+    } catch (e) { setCheckNote(e.message); } finally { setSettling(null); }
+  };
+  const checkWhen = c => `${c.how === 'crew' ? 'giving to crew' : 'mailed'} ${shortDate(c.at)}${c.number ? ` · #${c.number}` : ''}`;
   const [paying, setPaying] = useState(null);
   const [showAllUnpaid, setShowAllUnpaid] = useState(false);
   const UNPAID_PREVIEW = 5;
@@ -135,7 +149,8 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     try { await (remindAccounts ? remindAccounts([acct]) : remindCustomer(acct.latest.id, reminderMessage(acct.latest, COMPANY_INFO.name))); } finally { setReminding(null); }
   };
   // One reminder per customer per week — anyone reminded in the last 7 days waits.
-  const toRemind = behind.filter(c => !c.recentlyReminded);
+  // Nobody with a check on the way gets reminded.
+  const toRemind = behind.filter(c => !c.recentlyReminded && !c.check);
   const [bulk, setBulk] = useState({ open: false, busy: false, done: '' });
   const remindAll = async () => {
     setBulk(b => ({ ...b, busy: true }));
@@ -180,6 +195,37 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
           </div>
         )}
 
+        {checks.length > 0 && (
+          <div>
+            <h3 style={{ ...sectionTitle, color: '#a371f7' }}>📨 Checks to clear · {checks.length} · {money(checks.reduce((s, c) => s + c.amount, 0))}</h3>
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              {(showAllChecks ? checks : checks.slice(0, 5)).map(c => (
+                <div key={c.id} className="check-row">
+                  <span style={{ flex: '1 1 170px', minWidth: 0 }}>
+                    <Addr job={c.jobs[0]} />
+                    <span className="cust-dim"> · {c.clientName}</span>
+                    <div className="cust-dim" style={{ fontSize: '12px' }} title={CHECK_HOW[c.how]}>
+                      🧾 {checkWhen(c)} · {c.jobs.length} visit{c.jobs.length === 1 ? '' : 's'}{c.by === 'owner' ? ' · noted by you' : ''}
+                    </div>
+                  </span>
+                  <b style={{ width: '58px', textAlign: 'right' }}>{money(c.amount)}</b>
+                  <span className="row-actions">
+                    <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, false)} title="The check bounced">Bounced</button>
+                    <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, true)}
+                      style={{ color: '#3fb950', borderColor: '#3fb95055' }} title="Got the check: mark these visits paid by check">{settling === c.id ? '…' : '✓ Received'}</button>
+                  </span>
+                </div>
+              ))}
+            </div>
+            {checks.length > 5 && (
+              <button type="button" className="btn-ghost" onClick={() => setShowAllChecks(s => !s)} style={{ marginTop: '8px', padding: '6px 12px', fontSize: '12px' }}>
+                {showAllChecks ? 'Show less' : `Show ${checks.length - 5} more`}
+              </button>
+            )}
+            {checkNote && <div className={/^✓/.test(checkNote) ? 'remind-done' : 'cust-dim'} style={{ fontSize: '12px', marginTop: '6px' }}>{checkNote}</div>}
+          </div>
+        )}
+
         {problems.length > 0 && (
           <div>
             <h3 style={{ ...sectionTitle, color: '#ff7b72' }}>Payment problems · {problems.length}</h3>
@@ -191,12 +237,14 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     <Addr job={job} />
                     <span style={{ color: 'var(--text-muted)' }}> · {job.clientName}</span>
                     <div style={{ fontSize: '12px', color: '#ff7b72' }}>
-                      {job.paymentIssue.brand || 'Card'} ••{job.paymentIssue.last4 || '----'} · {job.paymentIssue.reason} · {shortDate(job.paymentIssue.at)}
+                      {job.paymentIssue.method === 'check'
+                        ? `Check${job.paymentIssue.last4 ? ` #${job.paymentIssue.last4}` : ''} bounced`
+                        : `${job.paymentIssue.brand || 'Card'} ••${job.paymentIssue.last4 || '----'} · ${job.paymentIssue.reason}`} · {shortDate(job.paymentIssue.at)}
                     </div>
                   </span>
                   <span style={{ fontWeight: 700, width: '60px', textAlign: 'right' }}>{money(job.earnings || 0)}</span>
                   <span className="row-actions">
-                    <button type="button" className="btn-ghost remind-btn" disabled={paying === job.id} onClick={() => record(job, 'card', '4242')} title="Try the charge again">↻ Retry card</button>
+                    {job.paymentIssue.method !== 'check' && <button type="button" className="btn-ghost remind-btn" disabled={paying === job.id} onClick={() => record(job, 'card', '4242')} title="Try the charge again">↻ Retry card</button>}
                     {remindCustomer && (() => {
                       const wait = nextReminderDate(contactsFor(jobs.filter(j => lawnKey(j) === lawnKey(job)))[0], today);
                       return <button type="button" className="btn-ghost remind-btn" disabled={!!wait || reminding === job.id} onClick={() => remind(job)} title={wait ? `One reminder per week. Next on ${shortDate(wait)}.` : 'Send a payment reminder'}>{wait ? `🔔 ${shortDate(wait)}` : '🔔 Remind'}</button>;
@@ -277,6 +325,9 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     {acct.lastReminder && (
                       <span className="reminded" title={acct.lastReminder.message}> · 🔔 {shortDate(acct.lastReminder.at)}{acct.reminders > 1 ? ` ×${acct.reminders}` : ''}</span>
                     )}
+                    {acct.check && (
+                      <div className="check-badge">📨 Check coming · {checkWhen(acct.check)}{acct.checkCoversAll ? '' : ` · covers ${money(acct.check.amount)}`}</div>
+                    )}
                   </span>
                   <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
                     style={{ color: late ? '#f0b429' : 'var(--text-muted)', fontWeight: late ? 700 : 400 }} title={n > 1 ? `Show each ${snow ? 'push' : 'cut'}` : `${snow ? 'Plowed' : 'Cut'} ${shortDate(acct.jobs[0].completedAt)}`}>
@@ -287,7 +338,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                   {printInvoice && (
                     <button type="button" className="btn-ghost remind-btn" onClick={() => printInvoice(acct.latest)} title="Print a paper invoice with a pay QR code" aria-label={`Print invoice for ${acct.name}`}>🖨</button>
                   )}
-                  {(remindAccounts || remindCustomer) && (
+                  {(remindAccounts || remindCustomer) && !acct.check && (
                     (() => {
                       const wait = nextReminderDate(acct.lastReminder, today);
                       return (
@@ -298,17 +349,30 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                       );
                     })()
                   )}
+                  {acct.check && settleCheck ? (
+                    // Their check is on the way: one tap when it shows up (paid by check).
+                    <button type="button" className="btn-ghost" disabled={settling === acct.check.id} onClick={() => settle({ ...acct.check, clientName: acct.name }, true)}
+                      style={{ padding: '3px 10px', fontSize: '12px', color: '#a371f7', borderColor: '#a371f755' }}
+                      title={`Got their check: mark ${money(acct.check.amount)} paid by check`}>
+                      {settling === acct.check.id ? '…' : '✓ Acknowledge check'}
+                    </button>
+                  ) : (
                   <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}
                     aria-expanded={choosing === acct.key} style={bare ? { padding: '3px 10px', fontSize: '12px', color: '#3fb950', borderColor: '#3fb95055' } : { padding: '6px 14px', fontSize: '12px' }}
                     title={n > 1 ? `Mark all ${n} ${unit} paid (${money(acct.balance)})` : 'Mark paid'}>
                     {paying === acct.key ? '…' : n > 1 ? 'Mark all paid' : 'Mark paid'}
                   </button>
+                  )}
                   </span>
                   {choosing === acct.key && (
                     <div className="pay-choose">
                       <span>{n > 1 ? `All ${n} ${unit} · ${money(acct.balance)} paid by` : 'Paid by'}</span>
                       <button type="button" onClick={() => recordAll(acct, 'cash')}>{METHODS.cash.icon} Cash</button>
                       <button type="button" onClick={() => recordAll(acct, 'check')}>{METHODS.check.icon} Check</button>
+                      {promiseCheck && (
+                        <button type="button" title="They called to say a check is coming: hold reminders and list it under Checks to clear"
+                          onClick={async () => { setChoosing(null); try { await promiseCheck(acct.jobs.map(j => j.id), 'mail', ''); } catch (e) { setCheckNote(e.message); } }}>📨 Check coming</button>
+                      )}
                       <span className="pay-choose-card">
                         <select value={testCard} onChange={e => setTestCard(e.target.value)} aria-label="Test card" title="Test card processor — pick a card that approves or declines">
                           {TEST_CARD_ORDER.map(l4 => [l4, TEST_CARDS[l4]]).map(([l4, c]) => <option key={l4} value={l4}>{c.brand} ••{l4}{c.ok ? '' : ` (${c.reason.toLowerCase()})`}</option>)}

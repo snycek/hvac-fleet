@@ -62,6 +62,8 @@ export function invoiceLine(job, today = todayString(), settings) {
     paidAt: job.paidAt || null,
     dueDate: dueDateFor(job, settings),
     pastDue: daysPastDue(job, today, settings) > 0,
+    // A check the customer said is on the way (still unpaid until it arrives).
+    checkPending: job.checkPending && !job.paid ? { at: job.checkPending.at, how: job.checkPending.how, number: job.checkPending.number } : null,
   };
 }
 

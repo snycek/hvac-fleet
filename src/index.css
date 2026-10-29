@@ -702,6 +702,21 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .outline-auto.error span { color: #f0b429; }
 .outline-auto.busy .btn-primary { opacity: 0.8; }
 .outline-auto.picking { border-color: #f0b429aa; background: #f0b4291a; }
+/* Auto-outline warnings on John's quote card */
+.outline-warn { background: #f0b42914; border: 1px solid #f0b42966; border-radius: 10px; padding: 9px 12px; font-size: 13px; }
+.outline-warn b { color: #f0b429; }
+.outline-warn ul { margin: 4px 0 0; padding-left: 18px; }
+.outline-warn li { margin: 2px 0; }
+.outline-tag { font-size: 11.5px; color: #58a6ff; margin-bottom: 2px; }
+/* Waiting card while the AI outlines: a mower crossing a grass strip */
+.mow-card { position: absolute; z-index: 600; left: 50%; top: 64px; transform: translateX(-50%); width: min(360px, calc(100% - 24px)); background: #0d1117ee; border: 1px solid #3fb95066; border-radius: 14px; padding: 12px 14px 10px; box-shadow: 0 8px 24px #0009; color: #e6edf3; }
+.mow-step { font-weight: 800; font-size: 14px; margin-bottom: 8px; }
+.mow-track { position: relative; height: 22px; border-radius: 999px; overflow: visible;
+  background: repeating-linear-gradient(100deg, #2f6b2a 0 6px, #3a7d33 6px 9px, #2a5f26 9px 14px); box-shadow: inset 0 0 0 1px #0006; }
+.mow-cut { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; transition: width 0.25s linear;
+  background: repeating-linear-gradient(90deg, #6fcf5f 0 14px, #5ab84c 14px 28px); }
+.mow-mower { position: absolute; top: 50%; font-size: 20px; line-height: 1; transform: translate(-30%, -58%) scaleX(-1); transition: left 0.25s linear; filter: drop-shadow(0 1px 1px #0008); }
+.mow-line { margin-top: 8px; font-size: 12px; color: #9fb3a0; min-height: 16px; }
 /* ✛ target in the middle of the quote map: drag the map until it's on your roof */
 .map-crosshair { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; margin: -17px 0 0 -17px; pointer-events: none; z-index: 500; }
 .map-crosshair::before, .map-crosshair::after { content: ''; position: absolute; background: #fff; box-shadow: 0 0 0 1.5px #000a; }

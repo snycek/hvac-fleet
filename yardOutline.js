@@ -82,9 +82,10 @@ const ZONE_NAMES = ['Front Yard', 'Back Yard', 'Side Yard', 'Side Yard 2', 'Boul
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['layout', 'zones', 'note'],
+  required: ['layout', 'zones', 'note', 'warnings'],
   properties: {
     layout: { type: 'string' },
+    warnings: { type: 'array', items: { type: 'string' } },
     zones: {
       type: 'array',
       items: {
@@ -127,7 +128,9 @@ Outline the mowable grass that belongs to that one property, as polygons in pixe
 
 Before the polygons, fill in layout: a few sentences describing this lot as you see it: where the street and sidewalk are, the house, the driveway, any detached garage or shed, fences and hedges, where the lot ends on each side and at the back, and which parts are grass. Then trace from that.
 
-In note, give one short sentence the customer will see (e.g. "Outlined your front and back lawns; check the edge by the driveway").${dot
+In note, give one short sentence the customer will see (e.g. "Outlined your front and back lawns; check the edge by the driveway").
+
+In warnings, list for the business owner (not the customer) anything to double-check before pricing, one short sentence each naming the area, for example: "Back yard mostly under heavy tree cover; grass there isn't outlined", "Rear lot line unclear; back yard may extend further", "Back of the lot is out of the photo". Only real concerns; leave it empty if the outline looks complete.${dot
     ? `\n\nA small red dot marks ${tapped ? 'the spot they tapped (on their roof)' : 'the address point'}. The strip of credit text along the bottom edge is not part of the property.`
     : ''}`;
 }
@@ -136,7 +139,61 @@ In note, give one short sentence the customer will see (e.g. "Outlined your fron
  * Outline the grass around { lat, lng, tapped } (tapped: the customer tapped their roof;
  * otherwise it's the typed address). Returns { zones: [{ name, points: [[lat, lng]...] }], note, usage }.
  */
+// Shared call: photo + text → parsed JSON (structured output, server-side fallbacks).
+async function ask(shot, text, schema, effort) {
+  const response = await getClient().beta.messages.create({
+    model: MODEL,
+    max_tokens: 16000,
+    // On a policy decline, the API re-runs the request on Anthropic's recommended fallback.
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort, format: { type: 'json_schema', schema } },
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: shot.photo } },
+        { type: 'text', text },
+      ],
+    }],
+  });
+  if (response.stop_reason === 'refusal') throw new Error('The outline request was declined.');
+  const out = response.content.filter(b => b.type === 'text').map(b => b.text).join('');
+  try { return { out: JSON.parse(out), usage: response.usage }; } catch { throw new Error('Could not read the outline.'); }
+}
+// Pixel → [lat, lng] on a photo (a plain grid across its box at this size).
+const pixelToLatLng = ({ box, size }, { x, y }) => [
+  +(box.north - (Math.min(Math.max(y, 0), size) / size) * (box.north - box.south)).toFixed(7),
+  +(box.west + (Math.min(Math.max(x, 0), size) / size) * (box.east - box.west)).toFixed(7),
+];
+
+// Step 1 for a typed address: which roof is it? The pin often lands in the street, so the
+// AI finds the house the address belongs to on a wide photo, and the careful trace is then
+// done on a close-up centered on that roof (the map's ✛ moves there too).
+const HOUSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['found', 'x', 'y', 'reason'],
+  properties: { found: { type: 'boolean' }, x: { type: 'integer' }, y: { type: 'integer' }, reason: { type: 'string' } },
+};
+async function findHouse(point) {
+  const shot = await keyedPhoto({ ...point, tapped: false });
+  if (!shot) return null; // free photo: just trace from the address
+  const mid = shot.size / 2;
+  const { out } = await ask(shot, `This is a straight-down satellite photo, ${shot.size}×${shot.size} pixels, about ${shot.span} meters across (north is up). The red dot at the center (pixel ${mid},${mid}) is where a customer's typed street address landed on the map. Address points are often on the street, sidewalk or driveway in front of the house instead of on the roof.
+
+Find the house this address belongs to: usually the closest house, facing the street the dot is on (if the dot is on a roof already, that's the house). Give the pixel at the middle of that house's main roof (not the garage) as x, y. If there's no house near the dot, set found to false. In reason, one short sentence on how you picked it. The strip of credit text along the bottom edge is not part of the map.`, HOUSE_SCHEMA, 'medium');
+  if (!out.found) return null;
+  const [lat, lng] = pixelToLatLng(shot, out);
+  return { lat, lng };
+}
+
 export async function outlineYard(point) {
+  // Typed address: find the roof first, then trace from the roof like a tap.
+  let house = null;
+  if (!point.tapped) {
+    try { house = await findHouse(point); } catch (err) { console.warn('[OUTLINE] find house failed:', err.message); }
+    if (house) point = { lat: house.lat, lng: house.lng, tapped: true };
+  }
   const shot = (await keyedPhoto(point)) || (await freePhoto(point));
   const response = await getClient().beta.messages.create({
     model: MODEL,
@@ -168,5 +225,6 @@ export async function outlineYard(point) {
     .filter(z => Array.isArray(z.points) && z.points.length >= 3)
     .slice(0, 6)
     .map(z => ({ name: z.name, points: z.points.slice(0, 16).map(toLatLng) }));
-  return { zones, note: String(out.note || '').slice(0, 200), usage: response.usage };
+  const warnings = (Array.isArray(out.warnings) ? out.warnings : []).map(w => String(w).trim().slice(0, 160)).filter(Boolean).slice(0, 4);
+  return { zones, note: String(out.note || '').slice(0, 200), warnings, usage: response.usage, house };
 }

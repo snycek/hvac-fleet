@@ -266,9 +266,18 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{landOnly ? '🌳 You price it' : quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(price)) : '—'}</div>
+          {quote?.outline?.auto && <div className="outline-tag">✨ Outlined automatically{quote.outline.edited ? ' · customer adjusted it' : ''}</div>}
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(skip.length ? cutSqFt(quote.zones) : quote.totalSqFt)}${skip.length ? ` (was ${formatPrice(quote.estimate)})` : ''} · quoted ${timeAgo(job.createdAt, now)}` : `Not measured · ${timeAgo(job.createdAt, now)}`}</div>
         </div>
       </div>
+
+      {/* The auto-outline flagged something (e.g. grass hidden under trees): check before pricing. */}
+      {quote?.outline?.warnings?.length > 0 && (
+        <div className="outline-warn" role="note">
+          <b>⚠️ Check before pricing</b>
+          <ul>{quote.outline.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gap: '4px', fontSize: '13px', color: 'var(--text-muted)' }}>
         <div>📞 <a href={`tel:${digits(job.clientPhone)}`} style={{ color: 'var(--text-primary)' }}>{job.clientPhone}</a>{job.clientEmail || job.email ? <> · ✉️ <a href={`mailto:${job.clientEmail || job.email}`} style={{ color: 'var(--text-primary)' }}>{job.clientEmail || job.email}</a></> : null}</div>

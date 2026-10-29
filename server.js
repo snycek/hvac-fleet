@@ -272,6 +272,15 @@ function sanitizeQuote(quote) {
     // null = John prices it (snow removal).
     estimate: quote.estimate == null ? null : Math.max(0, Math.round(Number(quote.estimate) || 0)),
     wanted: (Array.isArray(quote.wanted) ? quote.wanted : []).slice(0, 5).map(s => String(s).slice(0, 40)),
+    // ✨ auto-outline: whether it was used, whether the customer adjusted it, and what the
+    // AI says John should double-check (tree cover hiding grass, unclear lot lines…).
+    ...(quote.outline?.auto ? {
+      outline: {
+        auto: true,
+        edited: Boolean(quote.outline.edited),
+        warnings: (Array.isArray(quote.outline.warnings) ? quote.outline.warnings : []).slice(0, 4).map(w => String(w).slice(0, 160)),
+      },
+    } : {}),
   };
 }
 
@@ -344,8 +353,8 @@ app.post('/api/yard-outline', async (req, res) => {
   outlineDay.count += 1;
 
   try {
-    const { zones, note, usage } = await outlineYard({ lat, lng, tapped });
-    const result = { zones, note };
+    const { zones, note, warnings, usage, house } = await outlineYard({ lat, lng, tapped });
+    const result = { zones, note, warnings, ...(house ? { house } : {}) };
     outlineCache.set(key, { at: Date.now(), result });
     console.log(`[OUTLINE] ${key} → ${zones.length} zones (${usage?.input_tokens || 0} in / ${usage?.output_tokens || 0} out)`);
     return res.json(result);

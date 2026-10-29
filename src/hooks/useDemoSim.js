@@ -555,6 +555,8 @@ const QUOTE_SEEDS = [
     notes: 'Please mow Fridays so it looks sharp for Sunday. The field out back too.',
     place: {
       address: '10080 Reeck Rd, Allen Park, MI 48101', lat: 42.23458, lng: -83.22115,
+      // As if the customer used ✨ auto-outline: what it flagged for John.
+      outline: { auto: true, edited: false, warnings: ['South lawn edge runs under a row of trees; the grass under them isn\'t outlined.', 'West side of the back field has no clear lot line; check where the property ends.'] },
       // Big open areas mow fast: a flat per-cut price (the per-sq-ft house formula would say ~$1,600).
       price: 225,
       zones: [
@@ -581,7 +583,7 @@ function quoteFromPlace(s, i, weekStart) {
     address, location: { lat, lng }, status: 'quote', assignedTo: null, earnings: estimate,
     notes: `Measured ${totalSqFt.toLocaleString()} sq ft.${s.notes ? ` Notes: ${s.notes}` : ''}`,
     createdAt: iso(at(weekStart, 7) - s.hoursAgo * 3600000),
-    quote: { totalSqFt, estimate, wanted: ['Lawn Cutting'], center: { lat, lng }, zones },
+    quote: { totalSqFt, estimate, wanted: ['Lawn Cutting'], center: { lat, lng }, zones, ...(s.place.outline ? { outline: s.place.outline } : {}) },
   };
 }
 

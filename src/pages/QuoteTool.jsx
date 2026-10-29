@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import YardMap from '../components/YardMap.jsx';
+import MowProgress from '../components/MowProgress.jsx';
 import AddressInput from '../components/AddressInput.jsx';
 import { COMPANY_INFO } from '../data/services.js';
 import { DEFAULT_CENTER, ZONE_COLORS, ZONE_NAME_SUGGESTIONS, areaSqFt, estimatePrice, formatPrice, formatSqFt, geocode } from '../lib/zones.js';
@@ -43,6 +44,9 @@ export default function QuoteTool({ setPage, initialServiceId }) {
 
   const findProperty = async e => {
     e.preventDefault();
+    advance();
+  };
+  const advance = async () => {
     if (!wanted.length) { setShowWantedError(true); return; }
     if (!form.name || !form.phone || !form.address) return;
     setLookup({ state: 'loading', msg: '' });
@@ -51,7 +55,9 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     // Only the street was known: start on the street and let them find the house.
     if (!found && picked && Number.isFinite(picked.lat)) found = { lat: picked.lat, lng: picked.lng, approx: true };
     if (found) {
-      setCenter(found);
+      // Already found their roof in the background (address picked earlier)? Start there.
+      const early = earlyHouse.current;
+      setCenter(early && early.from === `${found.lat},${found.lng}` ? { lat: early.lat, lng: early.lng } : found);
       setLookup({ state: 'idle', msg: '' });
       setStep('map');
       window.scrollTo(0, 0);
@@ -78,26 +84,38 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   // Runs by itself from the typed address as soon as the map opens. Addresses can land
   // on the street or a neighbor's lot, so "Wrong house?" lets them tap their own roof.
   // An automatic run never replaces zones they've started drawing themselves.
-  const autoOutline = async (house, { tapped = true } = {}) => {
+  const runId = useRef(0); // only the newest outline's result is used (they may change the address)
+  const autoOutline = async (house, { tapped = true, from = null } = {}) => {
     if (!house?.lat) return;
+    const run = ++runId.current;
     lastOutlined.current = { lat: house.lat, lng: house.lng };
     setOutline({ state: 'busy', msg: '', tapped });
     try {
       const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng, tapped }) });
       const data = await res.json().catch(() => ({}));
+      if (run !== runId.current) return; // a newer outline was started
       if (!res.ok) throw new Error(data.error || 'Could not outline it automatically.');
       if (!data.zones?.length) throw new Error(data.note || "We couldn't spot your lawn in the photo. Tap Draw a Zone to outline it yourself.");
       const stamp = Date.now();
       const auto = data.zones.map((z, i) => ({ id: `auto-${stamp}-${i}`, name: z.name, color: ZONE_COLORS[i % ZONE_COLORS.length], points: z.points }));
+      // The AI found the roof the address belongs to: put the ✛ and the pin on it.
+      if (data.house?.lat) {
+        lastOutlined.current = data.house;
+        autoRan.current = `${data.house.lat},${data.house.lng}`;
+        if (from) earlyHouse.current = { from, lat: data.house.lat, lng: data.house.lng };
+        // On the map already: move the ✛ there. (Still on the form: advance() starts there.)
+        setCenter(c => (c ? { ...c, lat: data.house.lat, lng: data.house.lng } : c));
+      }
       setZones(cur => {
         if (!tapped && cur.some(z => !String(z.id).startsWith('auto-'))) return cur;
         autoShapes.current = JSON.stringify(auto);
+        autoWarnings.current = Array.isArray(data.warnings) ? data.warnings : [];
         return auto;
       });
       setSelectedId(null);
       setOutline({ state: 'done', tapped, msg: data.note || 'Outlined your lawn. Tap a zone to drag its corners.' });
     } catch (err) {
-      setOutline({ state: 'error', msg: err.message });
+      if (run === runId.current) setOutline({ state: 'error', msg: err.message });
     }
   };
 
@@ -113,11 +131,27 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, outlineOn, snow, center?.lat, center?.lng]);
 
+  // As soon as they pick their address from the suggestions: start finding the house and
+  // outlining in the background (while they finish the form). If the rest of the form is
+  // already filled in, go straight to the map, no click needed.
+  const earlyHouse = useRef(null); // { from: 'lat,lng' of the picked address, lat, lng } once the roof is found
+  useEffect(() => {
+    if (!picked?.exact || !Number.isFinite(picked.lat)) return;
+    if (form.name && form.phone && wanted.length) { advance(); return; }
+    if (!outlineOn || snow) return;
+    const at = `${picked.lat},${picked.lng}`;
+    if (autoRan.current === at) return;
+    autoRan.current = at;
+    autoOutline({ lat: picked.lat, lng: picked.lng }, { tapped: false, from: at });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked?.lat, picked?.lng, outlineOn]);
+
   // Moving the map: when it stops (~2 s) with the ✛ somewhere new (15 m+ from the last
   // outline), outline the house under the ✛. Their own hand-drawn zones are never replaced.
   const lastOutlined = useRef(null);
   const lastMapCenter = useRef(null);
   const autoShapes = useRef(''); // the zones as the last outline returned them
+  const autoWarnings = useRef([]); // what the AI says John should double-check
   const moveTimer = useRef(null);
   const metersApart = (a, b) => Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * Math.cos((a.lat * Math.PI) / 180));
   const onMapMoved = c => {
@@ -152,6 +186,10 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       wanted,
       center,
       zones: zones.map(z => ({ name: z.name, color: z.color, sqFt: Math.round(areaSqFt(z.points)), points: z.points })),
+      // ✨ outlined automatically? (and what the AI flagged for John)
+      ...(zones.some(z => String(z.id).startsWith('auto-')) ? {
+        outline: { auto: true, edited: JSON.stringify(zones) !== autoShapes.current, warnings: autoWarnings.current },
+      } : {}),
     };
     try {
       const res = await fetch('/api/contact', {
@@ -258,7 +296,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             </div>
           )}
           <button className="btn-primary" type="submit" disabled={lookup.state === 'loading'} style={{ padding: '13px', fontSize: '15px' }}>
-            {lookup.state === 'loading' ? 'Finding your property…' : 'Find My Property →'}
+            {lookup.state === 'loading' ? 'Finding your property…' : outline.state === 'busy' ? 'See My Yard →' : 'Find My Property →'}
           </button>
         </form>
       </div>
@@ -295,7 +333,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           )}
           <span>
             {outline.state === 'picking' ? <b style={{ color: 'var(--text-primary)' }}>👆 Now tap the roof of your house on the map.</b>
-              : outline.state === 'busy' ? 'Outlining your lawn from the satellite photo. This takes about 15 seconds.'
+              : outline.state === 'busy' ? (outline.tapped ? 'Outlining your lawn from the satellite photo. This takes about 15 seconds.' : 'Finding your house, then outlining your lawn. This takes about 20 seconds.')
                 : outline.state === 'done' ? `${outline.msg} Wrong house? Drag the map so the ✛ is on your roof and it redoes it. Drag any corner to fix an edge.`
                   : outline.msg || 'Drag the map so the ✛ is on your roof, and we outline your lawn from the satellite photo. You can fix any corner after.'}
           </span>
@@ -303,7 +341,8 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       )}
 
       <div className="quote-layout">
-        <div style={{ minWidth: 0 }}>
+        <div style={{ minWidth: 0, position: 'relative' }}>
+          {outline.state === 'busy' && <MowProgress findingHouse={!outline.tapped} seconds={outline.tapped ? 15 : 20} />}
           <YardMap
             center={center}
             zones={zones}

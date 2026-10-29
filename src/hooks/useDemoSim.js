@@ -4,7 +4,7 @@ import plowData from '../data/demoPlowLots.json';
 import yardLink from '../data/yardConnector.json';
 import { addDays, todayString } from '../lib/dates.js';
 import { lawnKey } from '../lib/lawns.js';
-import { estimatePrice } from '../lib/zones.js';
+import { areaSqFt, estimatePrice } from '../lib/zones.js';
 import { bestInsertion, rankRoutes } from '../lib/routeFit.js';
 import { applyPaymentResult, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from '../lib/payments.js';
 import { headsUpRecord, wantsHeadsUp } from '../lib/notify.js';
@@ -547,14 +547,48 @@ const nextDateFor = (w, d) => addDays(w.weekStart, d > w.day ? d : d + 7);
 
 // New customers who just asked for a quote (outlined their yard on the website).
 const QUOTE_SEEDS = [
-  { near: 'wk-25', dLat: 0.0006, dLng: 0.0005, name: 'Hannah Brooks', bump: 40, notes: 'Side gate sticks — lift and push.', zones: [['Front Yard', 1500], ['Back Yard', 2600]], hoursAgo: 3 },
+  // The first one (the walkthrough's): a big church property on Reeck Rd, its grass traced
+  // from the satellite photo: the field out back, the lawns north and south of the lot,
+  // and the strip along Reeck. (Made-up church name; real lot shape.)
+  {
+    name: 'Reeck Road Community Church', hoursAgo: 3,
+    notes: 'Please mow Fridays so it looks sharp for Sunday. The field out back too.',
+    place: {
+      address: '10080 Reeck Rd, Allen Park, MI 48101', lat: 42.23458, lng: -83.22115,
+      // Big open areas mow fast: a flat per-cut price (the per-sq-ft house formula would say ~$1,600).
+      price: 225,
+      zones: [
+        { name: 'Back Field', points: [[42.235017, -83.22265], [42.235003, -83.22175], [42.2342, -83.22175], [42.234192, -83.22263]] },
+        { name: 'North Lawn', points: [[42.234995, -83.221725], [42.235017, -83.22095], [42.234567, -83.22094], [42.234552, -83.221725]] },
+        { name: 'Front Lawn', points: [[42.234837, -83.2203], [42.234837, -83.21995], [42.234219, -83.21995], [42.234219, -83.2203]] },
+        { name: 'South Lawn', points: [[42.23423, -83.221725], [42.234237, -83.22045], [42.234088, -83.220525], [42.233908, -83.2209], [42.233938, -83.2217]] },
+      ],
+    },
+  },
   { near: 'wk-170', dLat: -0.0005, dLng: 0.0007, name: 'Victor Salazar', bump: 22, notes: '', zones: [['Front Yard', 2100], ['Back Yard', 1900]], hoursAgo: 20 },
   { near: 'wk-330', dLat: 0.0004, dLng: -0.0006, name: 'Gwen Albrecht', bump: -30, notes: 'Please skip the flower bed by the porch.', zones: [['Front Yard', 1800], ['Back Yard', 3300], ['Side Yard', 700]], hoursAgo: 44 },
 ];
-const ZONE_TINTS = ['#4ade80', '#38bdf8', '#facc15'];
+const ZONE_TINTS = ['#4ade80', '#38bdf8', '#facc15', '#f472b6'];
+// A quote on a real property with its grass areas traced (seed.place).
+function quoteFromPlace(s, i, weekStart) {
+  const { lat, lng, address } = s.place;
+  const zones = s.place.zones.map((z, n) => ({ name: z.name, color: ZONE_TINTS[n % ZONE_TINTS.length], sqFt: Math.round(areaSqFt(z.points)), points: z.points }));
+  const totalSqFt = zones.reduce((sum, z) => sum + z.sqFt, 0);
+  const estimate = s.place.price ?? estimatePrice(totalSqFt);
+  return {
+    id: `quote-demo-${i + 1}`, service: 'Quote: Lawn Cutting', requested: ['Lawn Cutting'],
+    clientName: s.name, clientPhone: `(313) 555-${String(3100 + i * 7).slice(-4)}`,
+    address, location: { lat, lng }, status: 'quote', assignedTo: null, earnings: estimate,
+    notes: `Measured ${totalSqFt.toLocaleString()} sq ft.${s.notes ? ` Notes: ${s.notes}` : ''}`,
+    createdAt: iso(at(weekStart, 7) - s.hoursAgo * 3600000),
+    quote: { totalSqFt, estimate, wanted: ['Lawn Cutting'], center: { lat, lng }, zones },
+  };
+}
+
 // One quote request for week weekStart: QUOTE_SEEDS[i], sent the evening before.
 function demoQuote(i, weekStart) {
   return [QUOTE_SEEDS[i]].map(s => {
+    if (s.place) return quoteFromPlace(s, i, weekStart);
     const near = lawnById[s.near];
     const lat = near.lat + s.dLat;
     const lng = near.lng + s.dLng;

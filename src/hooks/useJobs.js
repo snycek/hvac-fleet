@@ -260,6 +260,20 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, []);
 
+  // Questions for the crew: a site-check stop for a quote, or onto a customer's next visit;
+  // the foreman's answers.
+  const postJson = async (url, method, body) => {
+    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save (HTTP ${res.status})`);
+    const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
+    if (Array.isArray(fresh)) setJobs(fresh);
+    return data;
+  };
+  const askCrewSiteCheck = useCallback((quoteId, plan) => postJson(`/api/jobs/${quoteId}/site-check`, 'POST', plan), []);
+  const askCrewNextVisit = useCallback((key, questions) => postJson('/api/customers/questions', 'POST', { key, questions }), []);
+  const answerChecks = useCallback((jobId, answers) => postJson(`/api/jobs/${jobId}/checks`, 'PUT', { answers }), []);
+
   // Owner moves a lawn's next cut: { scheduledDate, techId, mode: 'once' | 'always' }.
   const rescheduleJob = useCallback(async (jobId, plan) => {
     const res = await fetch(`/api/jobs/${jobId}/reschedule`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
@@ -296,5 +310,5 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, [reloadJobs]);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, askCrewSiteCheck, askCrewNextVisit, answerChecks, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
 }

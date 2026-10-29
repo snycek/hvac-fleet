@@ -702,6 +702,23 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .outline-auto.error span { color: #f0b429; }
 .outline-auto.busy .btn-primary { opacity: 0.8; }
 .outline-auto.picking { border-color: #f0b429aa; background: #f0b4291a; }
+/* Questions for the crew */
+.crew-answers { border: 1px solid #58a6ff55; background: #58a6ff10; border-radius: 10px; padding: 9px 12px; font-size: 13px; }
+.crew-answers.done { border-color: #3fb95066; background: #3fb95010; }
+.crew-answers-head { margin-bottom: 4px; }
+.crew-answers ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
+.crew-answers li span { margin-right: 6px; }
+.crew-a.yes { color: #3fb950; } .crew-a.no { color: #ff7b72; } .crew-a.unsure { color: #f0b429; }
+.ask-qs { display: flex; flex-direction: column; gap: 6px; }
+.ask-q { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: center; }
+.cust-crew { display: flex; flex-direction: column; gap: 8px; margin: 10px 0; }
+.crew-qs { width: 100%; display: flex; flex-direction: column; gap: 10px; background: #58a6ff12; border: 1px solid #58a6ff55; border-radius: 12px; padding: 12px; }
+.crew-qs-head { font-weight: 800; font-size: 14px; }
+.crew-q { display: flex; flex-direction: column; gap: 6px; }
+.crew-q-text { font-weight: 600; font-size: 14px; }
+.crew-q-btns { display: flex; gap: 6px; }
+.crew-q-btns button { flex: 1; padding: 10px 6px; border-radius: 10px; border: 2px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; font-size: 14px; cursor: pointer; }
+.crew-q-btns button[aria-pressed="true"] { border-color: var(--accent-teal); background: var(--accent-teal)22; color: var(--accent-teal); }
 /* Auto-outline warnings on John's quote card */
 .outline-warn { background: #f0b42914; border: 1px solid #f0b42966; border-radius: 10px; padding: 9px 12px; font-size: 13px; }
 .outline-warn b { color: #f0b429; }

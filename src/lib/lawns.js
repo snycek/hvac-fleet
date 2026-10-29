@@ -14,8 +14,10 @@ export function customerNotes(job) {
   return /^(Measured |Skipped measuring)/.test(text) ? '' : text.trim();
 }
 
+const isSiteCheckJob = j => j.service === 'Site check'; // free stop to answer the owner's questions
+
 export function lawnStats(jobs, key) {
-  const all = jobs.filter(j => lawnKey(j) === key && !['quote', 'declined'].includes(j.status));
+  const all = jobs.filter(j => lawnKey(j) === key && !['quote', 'declined'].includes(j.status) && !isSiteCheckJob(j));
   const cuts = all.filter(j => j.status === 'completed').sort((a, b) => String(b.completedAt).localeCompare(String(a.completedAt)));
   // Under 3 min is a mis-tap; over 10 hrs means they forgot to tap Mark Cut.
   // Landscaping projects at the same address take hours: they're not cut time.
@@ -53,7 +55,7 @@ export function lawnStats(jobs, key) {
 }
 
 export function allLawns(jobs) {
-  const keys = [...new Set(jobs.filter(j => !['quote', 'declined'].includes(j.status) && j.address).map(lawnKey))];
+  const keys = [...new Set(jobs.filter(j => !['quote', 'declined'].includes(j.status) && j.address && !isSiteCheckJob(j)).map(lawnKey))];
   return keys.map(k => lawnStats(jobs, k));
 }
 

@@ -17,6 +17,7 @@ import { COMPANY_INFO } from './src/data/services.js';
 import { CREW_KINDS, EMPLOYEE_ROLES, crewKind, isLandscapingJob } from './src/lib/crews.js';
 import { cleanItems, offerTotal, quoteMessage } from './src/lib/landscape.js';
 import { outlineReady, outlineYard } from './yardOutline.js';
+import { SITE_CHECK, applyAnswers, newChecks } from './src/lib/siteCheck.js';
 import crypto from 'crypto';
 import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
 
@@ -511,7 +512,7 @@ app.put('/api/jobs/:id/status', (req, res) => {
   if (finished(status) && !finished(currentJob.status) && updatedJob.repeatDays > 0) {
     // The next visit copies the customer + schedule, never this visit's own history
     // (reminders, a check on the way, payment problems, skip notes).
-    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, regularDate: _rd, regularTech: _rt, movedAt: _ma, ...carry } = updatedJob;
+    const { reminders: _r, checkPending: _c, paymentIssue: _p, paymentId: _pi, paymentMethod: _pm, skippedAt: _sa, skipReason: _sr, skippedBy: _sb, regularDate: _rd, regularTech: _rt, movedAt: _ma, checks: _ck, ...carry } = updatedJob;
     // Moved just this once? The next one is back on the regular day with the regular crew.
     const crew = updatedJob.regularTech || updatedJob.assignedTo || null;
     nextJob = {
@@ -954,6 +955,52 @@ app.post('/api/portal/quote/:token/decline', (req, res) => {
   jobs[idx] = { ...jobs[idx], status: 'declined', declinedAt: now, declinedBy: 'customer', offer: { ...jobs[idx].offer, answer: 'declined', answeredAt: now, answeredBy: 'customer', reason: String(req.body?.reason || '').slice(0, 300) } };
   console.log(`[QUOTE] ${jobs[idx].clientName} declined`);
   res.json(quoteView(jobs[idx]));
+});
+
+// ---- Questions for the crew ----
+// From a quote: a free "Site check" stop on a foreman's route with the owner's questions
+// ("Does a 36-inch mower fit through the gate?"). The foreman answers on site.
+app.post('/api/jobs/:id/site-check', (req, res) => {
+  const quote = jobs.find((j) => j.id === req.params.id);
+  if (!quote) return res.status(404).json({ error: 'job not found' });
+  if (!['quote', 'quote_sent'].includes(quote.status)) return res.status(400).json({ error: 'Site checks are for quote requests.' });
+  const checks = newChecks(req.body?.questions);
+  if (!checks.length) return res.status(400).json({ error: 'Add at least one question.' });
+  const scheduledDate = String(req.body?.scheduledDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate) || scheduledDate < todayString()) return res.status(400).json({ error: 'Pick a day (today or later).' });
+  const techId = req.body?.techId;
+  if (!technicians.some((t) => t.id === techId)) return res.status(400).json({ error: 'Pick a foreman.' });
+  const visit = {
+    id: createJobId(), service: SITE_CHECK, status: 'assigned', assignedTo: techId, scheduledDate,
+    clientName: quote.clientName, clientPhone: quote.clientPhone, clientEmail: quote.clientEmail || quote.email || '',
+    address: quote.address, location: quote.location, earnings: 0, repeatDays: 0, paid: true,
+    siteCheckFor: quote.id, checks, notes: '', createdAt: new Date().toISOString(),
+  };
+  jobs.unshift(visit);
+  return res.status(201).json(visit);
+});
+
+// For an existing customer: questions ride on their next regular visit.
+app.post('/api/customers/questions', (req, res) => {
+  const key = String(req.body?.key || '');
+  const checks = newChecks(req.body?.questions);
+  if (!checks.length) return res.status(400).json({ error: 'Add at least one question.' });
+  const next = jobs
+    .filter((j) => lawnKey(j) === key && ['pending', 'assigned'].includes(j.status) && j.service !== SITE_CHECK)
+    .sort((a, b) => String(a.scheduledDate || '').localeCompare(String(b.scheduledDate || '')))[0];
+  if (!next) return res.status(404).json({ error: 'No upcoming visit to add the questions to.' });
+  const idx = jobs.findIndex((j) => j.id === next.id);
+  jobs[idx] = { ...next, checks: [...(next.checks || []), ...checks] };
+  return res.json(jobs[idx]);
+});
+
+// Foreman answers: [{ id, answer: yes|no|unsure, note }]
+app.put('/api/jobs/:id/checks', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  if (!jobs[idx].checks?.length) return res.status(400).json({ error: 'No questions on this visit.' });
+  jobs[idx] = { ...jobs[idx], checks: applyAnswers(jobs[idx].checks, req.body?.answers, req.user?.id || 'Crew', new Date().toISOString()) };
+  return res.json(jobs[idx]);
 });
 
 app.put('/api/jobs/:id/decline', (req, res) => {

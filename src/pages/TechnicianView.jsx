@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext.jsx';
 import { useJobs } from '../hooks/useJobs.js';
 import { useTechnicians } from '../hooks/useTechnicians.js';
 import JobCard from '../components/JobCard.jsx';
+import { CrewQuestions } from '../components/CrewChecks.jsx';
 import ExpenseModal from '../components/ExpenseModal.jsx';
 import { useExpenses } from '../hooks/useExpenses.js';
 import { useShareLocation } from '../hooks/useShareLocation.js';
@@ -105,7 +106,7 @@ const dayOf = job => job.scheduledDate || todayString();
 
 export default function TechnicianView() {
   const { activeTechId, user, setActiveTechId, demoMode } = useApp();
-  const { jobs, updateJobStatus2, crewCollect } = useJobs();
+  const { jobs, updateJobStatus2, crewCollect, answerChecks } = useJobs();
   const { technicians, updateTechLocation, updateTechStatus } = useTechnicians();
   const { addExpense } = useExpenses({ poll: false });
   const gps = useShareLocation(activeTechId, updateTechLocation);
@@ -291,7 +292,9 @@ export default function TechnicianView() {
               // Landscaping jobs: "Start Job" / "Mark Done" instead of cutting words.
               const steps = (TRANSITIONS[job.status] || []).map(s => (/^landscaping/i.test(String(job.service || ''))
                 ? { ...s, label: s === START ? '🌳 Start Job' : s === MARK_CUT ? '✅ Mark Done' : s.label }
-                : s));
+                : job.service === 'Site check'
+                  ? { ...s, label: s === START ? '📋 Start Check' : s === MARK_CUT ? '✅ Done' : s.label }
+                  : s));
               const cuttingFor = job.status === 'in_progress' && job.startedAt ? Math.max(0, Math.round((Date.now() - new Date(job.startedAt)) / 60000)) : null;
               const isLoading = loadingId === job.id;
               const isExpanded = expandedId === job.id;
@@ -303,6 +306,7 @@ export default function TechnicianView() {
                   onClick={() => setExpandedId(isExpanded ? null : job.id)}
                   actions={steps.length ? (
                     <>
+                      <CrewQuestions job={job} onSave={answerChecks} />
                       {cuttingFor != null && (
                         <div style={{ width: '100%', fontSize: '13px', fontWeight: 600, color: '#e67e22' }}>✂️ Cutting · {cuttingFor} min</div>
                       )}
@@ -346,7 +350,7 @@ export default function TechnicianView() {
           <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-muted)' }}>Recently Cut</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {done.slice(0, 10).map(job => (
-              <JobCard key={job.id} job={job} actions={doneToday.includes(job) ? paidActions(job) : null} />
+              <JobCard key={job.id} job={job} actions={(job.checks?.length || doneToday.includes(job)) ? <>{job.checks?.some(c => !c.answer) && <CrewQuestions job={job} onSave={answerChecks} />}{doneToday.includes(job) ? paidActions(job) : null}</> : null} />
             ))}
           </div>
         </div>

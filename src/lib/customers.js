@@ -30,7 +30,9 @@ export function contactsFor(jobs) {
 /** Full history for the customer at this job's address. */
 export function customerHistory({ jobs, payments = [], key, today, settings }) {
   const mine = jobs.filter(j => lawnKey(j) === key && j.status !== 'quote' && j.status !== 'declined');
-  const latest = [...mine].sort((a, b) => serviceDate(b).localeCompare(serviceDate(a)))[0] || {};
+  // (a free "Site check" stop isn't their service: price, contact etc. come from real visits)
+  const latest = [...mine].filter(j => j.service !== 'Site check').sort((a, b) => serviceDate(b).localeCompare(serviceDate(a)))[0]
+    || [...mine].sort((a, b) => serviceDate(b).localeCompare(serviceDate(a)))[0] || {};
   const ids = new Set(mine.map(j => j.id));
 
   const visits = [...mine].sort((a, b) => serviceDate(b).localeCompare(serviceDate(a))).map(j => ({

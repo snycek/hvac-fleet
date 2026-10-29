@@ -9,6 +9,8 @@ import { bestPerDay, fmtMiles } from '../lib/routeFit.js';
 import { crewKind, isLandscapingJob, wantsLandscaping } from '../lib/crews.js';
 import LandscapeQuoteModal from './LandscapeQuoteModal.jsx';
 import CostSheet from './CostSheet.jsx';
+import AskCrewModal from './AskCrewModal.jsx';
+import { CrewAnswers } from './CrewChecks.jsx';
 import { cutBreakdown, fixedMonthlyTotal } from '../lib/jobCost.js';
 import { directionsLinks, driveEstimate, fmtDrive, metersBetween, nearestTruck } from '../lib/distance.js';
 
@@ -240,7 +242,7 @@ function AddCustomerModal({ job, skip = [], foremen: allForemen, onSave, onClose
   );
 }
 
-function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onShowOnMap, skip = [], onToggleZone, rates, fixedCosts }) {
+function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onShowOnMap, skip = [], onToggleZone, rates, fixedCosts, checkVisit, onAskCrew, techName }) {
   const [showCost, setShowCost] = useState(false);
   const requested = requestedServices(job);
   // Landscaping: John prices it and it goes back to the customer to accept.
@@ -298,6 +300,8 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
         {job.notes && /Notes: /.test(job.notes) && <div>📝 {job.notes.split('Notes: ').slice(1).join('Notes: ')}</div>}
       </div>
 
+      {checkVisit && <CrewAnswers checks={checkVisit.checks} title="Site check" date={checkVisit.scheduledDate} techName={techName(checkVisit.assignedTo)} />}
+
       <QuoteDistance job={job} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap} />
 
       {/* What this job would make after costs — only when John asks for it. */}
@@ -318,6 +322,9 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
         <a className="btn-ghost" href={`tel:${digits(job.clientPhone)}`} style={{ textDecoration: 'none', padding: '9px 14px', fontSize: '13px' }}>📞 Call</a>
         <a className="btn-ghost" href={`sms:${digits(job.clientPhone)}?&body=${smsBody}`} style={{ textDecoration: 'none', padding: '9px 14px', fontSize: '13px' }}>💬 Text</a>
         <span style={{ flex: 1 }} />
+        {onAskCrew && (
+          <button type="button" className="btn-ghost" onClick={onAskCrew} style={{ padding: '9px 14px', fontSize: '13px' }} title="Send a foreman to check something before you price it">📋 {checkVisit ? 'Ask more' : 'Ask the crew'}</button>
+        )}
         {rates && price > 0 && (
           <button type="button" className="btn-ghost" aria-pressed={showCost} onClick={() => setShowCost(s => !s)} style={{ padding: '9px 14px', fontSize: '13px' }}>📊 {showCost ? 'Hide breakdown' : 'Breakdown'}</button>
         )}
@@ -334,7 +341,12 @@ function QuoteCard({ job, onAdd, onDecline, onPriceLand, now, trucks, shop, onSh
 
 /** New quotes waiting for a yes/no (part of the owner's To-Do). */
 // trucks: with live locations (for "how far"). shop: { lat, lng } or null. onShowOnMap(job).
-export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote, trucks = technicians, shop = null, onShowOnMap = null, costRates = null, fixedCosts = [] }) {
+export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote, trucks = technicians, shop = null, onShowOnMap = null, costRates = null, fixedCosts = [], askCrewSiteCheck = null }) {
+  const [asking, setAsking] = useState(null); // quote being asked about
+  const lawnForemen = technicians.filter(t => crewKind(t) === 'lawn' && t.status !== 'pending_approval');
+  const techName = id => technicians.find(t => t.id === id)?.name?.split(' ')[0] || '';
+  // The newest site-check stop for each quote.
+  const checkFor = id => jobs.filter(j => j.siteCheckFor === id).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0] || null;
   const [adding, setAdding] = useState(null);
   const [pricing, setPricing] = useState(null); // landscaping request being priced
   const [skips, setSkips] = useState({}); // jobId → zone indexes marked "don't cut"
@@ -401,7 +413,8 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
           {quotes.map(job => (
             <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap}
-              skip={skips[job.id] || []} onToggleZone={i => toggleZone(job.id, i)} rates={costRates} fixedCosts={fixedCosts} />
+              skip={skips[job.id] || []} onToggleZone={i => toggleZone(job.id, i)} rates={costRates} fixedCosts={fixedCosts}
+              checkVisit={checkFor(job.id)} techName={techName} onAskCrew={askCrewSiteCheck ? () => setAsking(job) : null} />
           ))}
         </div>
       )}
@@ -426,6 +439,14 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
             </div>
           ))}
         </div>
+      )}
+
+      {asking && (
+        <AskCrewModal job={asking} mode="site" foremen={lawnForemen} planRoutes={planRoutes} today={today} onClose={() => setAsking(null)}
+          onSend={async plan => {
+            await askCrewSiteCheck(asking.id, plan);
+            flash(`Site check sent: ${formatDay(plan.scheduledDate)} with ${techName(plan.techId) || 'your foreman'}. The answers show on the quote.`);
+          }} />
       )}
 
       {pricing && (

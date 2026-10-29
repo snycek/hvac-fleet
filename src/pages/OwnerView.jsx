@@ -330,7 +330,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
   // Today's visits for one truck (route order) or every truck.
   // Door invoices are only for customers billed per visit (monthly ones get a statement).
   const todaysVisits = techId => jobs
-    .filter(j => jobDay(j, today) === today && j.status !== 'quote' && billingMode(j) === 'visit' && (!techId || j.assignedTo === techId))
+    .filter(j => jobDay(j, today) === today && j.status !== 'quote' && billingMode(j) === 'visit' && j.earnings > 0 && (!techId || j.assignedTo === techId))
     .sort((a, b) => String(a.assignedTo).localeCompare(String(b.assignedTo)));
   const routeTechs = technicians.filter(t => t.status !== 'pending_approval' && jobs.some(j => j.assignedTo === t.id && jobDay(j, today) === today && billingMode(j) === 'visit'));
 
@@ -554,6 +554,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
           onRemind={() => remindAccounts([openAccount(customerKey)])}
           onPrint={() => { const a = openAccount(customerKey); if (a.jobs.length) printBillFor(a.jobs[a.jobs.length - 1]); }}
           onUpdate={updateCustomer}
+          technicians={technicians}
+          onAskCrew={demoOn ? sim.askCrewNextVisit : live.askCrewNextVisit}
         />
       )}
       {printing && <PrintInvoices title={printing.title} items={printing.items} onClose={() => setPrinting(null)} />}
@@ -569,6 +571,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
     ...landQuoteFns,
     trucks: mapTechs, shop, onShowOnMap: showQuoteOnMap,
     payDue, onOpenPayroll: openPayroll,
+    askCrewSiteCheck: demoOn ? sim.askCrewSiteCheck : live.askCrewSiteCheck,
     costRates, fixedCosts,
   };
   const routeTechList = demoOn ? technicians.filter(t => t.status !== 'offline') : technicians;
@@ -735,7 +738,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
             {!collapsed.todo && <div className="dash-panel-body">
               {leftTab === 'quotes' ? (
                 quoteCount ? (
-                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} trucks={mapTechs} shop={shop} onShowOnMap={showQuoteOnMap} costRates={costRates} fixedCosts={fixedCosts} />
+                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} trucks={mapTechs} shop={shop} onShowOnMap={showQuoteOnMap} costRates={costRates} fixedCosts={fixedCosts} askCrewSiteCheck={demoOn ? sim.askCrewSiteCheck : live.askCrewSiteCheck} />
                 ) : <div className="cust-empty">✓ No new quote requests. New ones from the website land here.</div>
               ) : leftTab === 'todo' ? (
                 <OwnerTodo

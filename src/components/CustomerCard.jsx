@@ -1,3 +1,7 @@
+import { lawnKey } from '../lib/lawns.js';
+import AskCrewModal from './AskCrewModal.jsx';
+import { CrewAnswers } from './CrewChecks.jsx';
+import { checksAt, isSiteCheck } from '../lib/siteCheck.js';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { customerHistory, methodLabel, nextReminderDate } from '../lib/customers.js';
@@ -19,7 +23,13 @@ const contactKind = c => (c.kind === 'heads_up' ? 'on-the-way text (automatic)' 
  * Everything about one customer (by service address): balance, payments (incl. declined
  * cards), every reminder sent with its exact wording (audit trail), and all visits.
  */
-export default function CustomerCard({ customerKey, jobs, payments, today, settings, onClose, onRemind, onPrint, onUpdate }) {
+export default function CustomerCard({ customerKey, jobs, payments, today, settings, onClose, onRemind, onPrint, onUpdate, technicians = [], onAskCrew = null }) {
+  const [asking, setAsking] = useState(false);
+  const crewChecks = useMemo(() => checksAt(jobs, customerKey, lawnKey), [jobs, customerKey]);
+  const nextVisit = useMemo(() => jobs
+    .filter(j => lawnKey(j) === customerKey && ['pending', 'assigned'].includes(j.status) && !isSiteCheck(j))
+    .sort((a, b) => String(a.scheduledDate || '').localeCompare(String(b.scheduledDate || '')))[0] || null, [jobs, customerKey]);
+  const techName = id => technicians.find(t => t.id === id)?.name?.split(' ')[0] || '';
   const h = useMemo(() => customerHistory({ jobs, payments, key: customerKey, today, settings }), [jobs, payments, customerKey, today, settings]);
   const [tab, setTab] = useState('payments');
   const [busy, setBusy] = useState(false);
@@ -107,6 +117,18 @@ export default function CustomerCard({ customerKey, jobs, payments, today, setti
           {note && <span className="cust-note">{note}</span>}
         </div>
 
+        {(crewChecks.length > 0 || (onAskCrew && nextVisit)) && (
+          <div className="cust-crew">
+            {crewChecks.length > 0 && <CrewAnswers checks={crewChecks} title="Questions for the crew" />}
+            {onAskCrew && nextVisit && (
+              <button type="button" className="btn-ghost" onClick={() => setAsking(true)} style={{ padding: '6px 12px', fontSize: '12.5px' }}>📋 Ask the crew on the next visit</button>
+            )}
+          </div>
+        )}
+        {asking && (
+          <AskCrewModal job={nextVisit} mode="visit" nextVisit={{ date: nextVisit.scheduledDate, techName: techName(nextVisit.assignedTo) }} today={today}
+            onClose={() => setAsking(false)} onSend={({ questions }) => onAskCrew(customerKey, questions)} />
+        )}
         <div className="cust-tabs" role="tablist">
           {tabs.map(([id, label]) => (
             <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)}>{label}</button>

@@ -2,10 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { mockTechnicians } from '../data/mockData.js';
 import { FIREBASE_ENABLED, db } from '../lib/firebase.js';
 
-export function useTechnicians() {
+// live=false: no server calls (the public /demo page runs on demo data only).
+export function useTechnicians({ live = true } = {}) {
   const [technicians, setTechnicians] = useState([]);
 
   useEffect(() => {
+    if (!live) return undefined;
     if (!FIREBASE_ENABLED) {
       let cancelled = false;
       let intervalId = null;
@@ -51,7 +53,7 @@ export function useTechnicians() {
         unsubscribe();
       }
     };
-  }, []);
+  }, [live]);
 
   const updateTechStatus = useCallback(async (techId, status) => {
     if (!FIREBASE_ENABLED) {

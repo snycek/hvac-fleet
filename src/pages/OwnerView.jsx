@@ -76,15 +76,30 @@ const COLUMNS = [
 ];
 
 /** Owner hub: everything on one screen. Long lists scroll inside their own panel. */
-export default function OwnerView() {
-  const live = useJobs();
-  const liveExpenses = useExpenses();
-  const { technicians: liveTechs } = useTechnicians();
-  const liveDelays = useDelays();
-  const { shifts: liveShifts } = useShifts();
-  const livePayments = usePayments();
-  const sim = useDemoSim();
-  const [demoOn, setDemoOn] = useState(false);
+export default function OwnerView({ demoOnly = false } = {}) {
+  // demoOnly: the public /demo link. Demo runs on its own (1×, 2 trucks by default),
+  // nothing talks to the server, and there's no way out into live data.
+  const serverless = demoOnly;
+  const live = useJobs({ live: !serverless });
+  const liveExpenses = useExpenses({ poll: !serverless });
+  const { technicians: liveTechs } = useTechnicians({ live: !serverless });
+  const liveDelays = useDelays({ poll: !serverless });
+  const { shifts: liveShifts } = useShifts({ poll: !serverless });
+  const livePayments = usePayments({ poll: !serverless });
+  // /demo?speed=1&trucks=2 (both optional): already playing from the first frame.
+  const [linkOpts] = useState(() => {
+    const q = new URLSearchParams(window.location.search);
+    const speed = Number(q.get('speed')) || 1;
+    return { speed: SPEEDS.includes(speed) ? speed : 1, trucks: Number(q.get('trucks')) || 2 };
+  });
+  const sim = useDemoSim(demoOnly ? { playing: true, speed: linkOpts.speed } : {});
+  const [demoOn, setDemoOn] = useState(demoOnly);
+  // A truck count other than the usual 2 rebuilds the demo once on open.
+  useEffect(() => {
+    if (demoOnly && linkOpts.trucks !== sim.truckCount && linkOpts.trucks >= 1 && linkOpts.trucks <= sim.maxTrucks) sim.setTruckCount(linkOpts.trucks);
+    // Once, on open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoOnly]);
   const [leftTab, setLeftTab] = useState('todo');
   const [view, setView] = useState('hub'); // 'hub' | 'payroll'
   const [selectedTechId, setSelectedTechId] = useState(null);
@@ -119,7 +134,7 @@ export default function OwnerView() {
   const payments      = demoOn ? sim.payments : livePayments;
   const sendStatementsFn = demoOn ? sim.sendStatements : live.sendStatements;
   const updateCustomer = demoOn ? sim.updateCustomer : live.updateCustomer;
-  const billing       = useBilling(demoOn);
+  const billing       = useBilling(demoOn, { serverless });
   const settings      = billing.settings;
 
   // Quotes live in To-Do until accepted; declined ones are hidden.
@@ -351,10 +366,12 @@ export default function OwnerView() {
             </div>
           ))}
         </div>
-        <button type="button" className="btn-ghost" onClick={toggleDemo} aria-pressed={demoOn}
-          style={{ padding: '7px 13px', fontSize: '13px', ...(demoOn ? { color: '#f0b429', borderColor: '#f0b42977', background: '#f0b42914' } : {}) }}>
-          🎬 {demoOn ? 'Demo on' : 'Demo'}
-        </button>
+        {!demoOnly && (
+          <button type="button" className="btn-ghost" onClick={toggleDemo} aria-pressed={demoOn}
+            style={{ padding: '7px 13px', fontSize: '13px', ...(demoOn ? { color: '#f0b429', borderColor: '#f0b42977', background: '#f0b42914' } : {}) }}>
+            🎬 {demoOn ? 'Demo on' : 'Demo'}
+          </button>
+        )}
       </div>
 
       {/* Demo controls */}
@@ -393,7 +410,7 @@ export default function OwnerView() {
           <span className="demo-sep" />
           <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
           <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
-          <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>
+          {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
         </div>
       )}
 

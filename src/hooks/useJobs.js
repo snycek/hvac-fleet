@@ -2,10 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { mockJobs } from '../data/mockData.js';
 import { FIREBASE_ENABLED, db } from '../lib/firebase.js';
 
-export function useJobs() {
+// live=false: no server calls (the public /demo page runs on demo data only).
+export function useJobs({ live = true } = {}) {
   const [jobs, setJobs] = useState([]);
 
   useEffect(() => {
+    if (!live) return undefined;
     if (!FIREBASE_ENABLED) {
       let cancelled = false;
       let intervalId = null;
@@ -53,7 +55,7 @@ export function useJobs() {
         unsubscribe();
       }
     };
-  }, []);
+  }, [live]);
 
   const updateJobStatus2 = useCallback(async (jobId, status) => {
     if (!FIREBASE_ENABLED) {

@@ -477,11 +477,12 @@ function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), star
   };
 }
 
-export function useDemoSim() {
+// start: { playing, speed } for the first frame (the public /demo link opens already running).
+export function useDemoSim(start = {}) {
   const [world, setWorld] = useState(() => initialWorld(true));
   const [positions, setPositions] = useState(() => depotPositions(Math.min(2, MAX_TRUCKS)));
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(3);
+  const [playing, setPlaying] = useState(!!start.playing);
+  const [speed, setSpeed] = useState(start.speed || 3);
   const [cleared, setCleared] = useState(false);
   const [bursts, setBursts] = useState([]);
   const worldRef = useRef(world);

@@ -23,6 +23,21 @@ function AppInner() {
   // Scanned the QR on a paper invoice: straight to their account, no site chrome.
   if (window.location.pathname.startsWith('/pay')) return <CustomerPortal />;
 
+  // Shareable demo link: the Owner Hub on made-up customers, already playing. No sign-in,
+  // and no real data (it never calls the server).
+  if (/^\/demo\/?$/.test(window.location.pathname)) {
+    return (
+      <div className="dash-shell">
+        <header className="demo-link-bar">
+          <span className="demo-link-brand">🌱 John's Lawn</span>
+          <span className="demo-link-note">🎬 Live demo · made-up customers in Allen Park</span>
+          <a className="demo-link-login" href="/">Real site →</a>
+        </header>
+        <main className="dash-shell-main"><OwnerView demoOnly /></main>
+      </div>
+    );
+  }
+
   const renderPage = () => {
     // Dashboard views (keep existing behavior)
     if (page === 'technician') return role === 'technician' ? <TechnicianView /> : <Login setPage={setPage} />;

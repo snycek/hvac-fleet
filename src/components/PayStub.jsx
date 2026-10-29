@@ -44,6 +44,7 @@ export default function PayStub({ employee, crewName, stub, ytd, onClose }) {
                 <tbody>
                   <tr><th>Pay period</th><td>{long(stub.weekStart)} – {long(stub.weekEnd)}</td></tr>
                   <tr><th>Status</th><td><b>{stub.paidAt ? `Paid ${long(stub.paidAt)}` : 'Not paid yet'}</b></td></tr>
+                  {stub.checkNo && <tr><th>Check #</th><td>{stub.checkNo}</td></tr>}
                 </tbody>
               </table>
             </div>

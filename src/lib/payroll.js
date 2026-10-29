@@ -37,7 +37,7 @@ export function crewHours(foremanTechId, date, { jobs, shifts, delays, payRain }
  * gross pay, and whether the week is marked paid.
  */
 export function buildPayroll({ employees, week, jobs, shifts, delays, settings }) {
-  const { hours: edits = {}, paid = {}, payRain = false } = settings || {};
+  const { hours: edits = {}, paid = {}, paidChecks = {}, payRain = false } = settings || {};
   const weekStart = week[0];
   const crewCache = {};
   const crewDay = (crewId, date) => {
@@ -59,7 +59,9 @@ export function buildPayroll({ employees, week, jobs, shifts, delays, settings }
     const overtime = quarter(Math.max(0, total - OVERTIME_AFTER));
     const gross = Math.round((regular * e.rate + overtime * e.rate * OVERTIME_RATE) * 100) / 100;
     const paidAt = paid[`${e.id}@${weekStart}`] || null;
-    return { employee: e, days, total, regular, overtime, gross, paidAt };
+    // Paycheck number, when one was recorded (the demo fills these in).
+    const checkNo = paidAt ? paidChecks[`${e.id}@${weekStart}`] || null : null;
+    return { employee: e, days, total, regular, overtime, gross, paidAt, checkNo };
   });
 }
 
@@ -121,7 +123,7 @@ export function payHistory(employee, { jobs, shifts, delays, settings }, today =
   for (let i = 0; i < weeksBack; i++, monday = addDays(monday, -7)) {
     const week = weekDates(monday);
     const [row] = buildPayroll({ employees: [employee], week, jobs, shifts, delays, settings });
-    if (!row || (!row.total && !row.paidAt)) continue;
+    if (!row || !row.total) continue; // weeks they didn't work
     out.push({ weekStart: week[0], weekEnd: week[6], ...row });
   }
   return out;

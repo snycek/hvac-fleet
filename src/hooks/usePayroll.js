@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { addDays } from '../lib/dates.js';
+
+const mondayOf = date => { const d = new Date(`${date}T12:00:00`); return addDays(date, -((d.getDay() + 6) % 7)); };
 
 // Crew roster + payroll settings. Live mode talks to the server; demo mode keeps a
 // made-up crew (2 cutters per foreman — a typical 3-person mowing crew) and the owner's edits in memory only.
@@ -27,7 +30,8 @@ async function send(url, method, body) {
   return data;
 }
 
-export function usePayroll({ demo = false, foremen = [] } = {}) {
+// today (demo calendar): every week before this one counts as paid that Friday, by check.
+export function usePayroll({ demo = false, foremen = [], today } = {}) {
   // ---- live ----
   const [liveEmployees, setLiveEmployees] = useState([]);
   const [liveSettings, setLiveSettings] = useState({ hours: {}, paid: {}, payRain: false });
@@ -57,8 +61,33 @@ export function usePayroll({ demo = false, foremen = [] } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [foremanKey, demoState.edits, demoState.added]);
 
+  // Demo: the crew is paid every Friday (paycheck numbers run in order), so each
+  // person's pay history has real stubs. This week stays open until the owner pays it.
+  const thisMonday = demo && today ? mondayOf(today) : null;
+  const demoPaidWeeks = useMemo(() => {
+    const paid = {};
+    const paidChecks = {};
+    if (!thisMonday) return { paid, paidChecks };
+    let check = 2001;
+    for (let w = 26; w >= 1; w--) {
+      const monday = addDays(thisMonday, -7 * w);
+      for (const e of demoEmployees) {
+        const key = `${e.id}@${monday}`;
+        paid[key] = `${addDays(monday, 4)}T16:30:00`;
+        paidChecks[key] = String(check++);
+      }
+    }
+    return { paid, paidChecks };
+  }, [thisMonday, demoEmployees]);
+
   const employees = demo ? demoEmployees : liveEmployees;
-  const settings = demo ? demoState : liveSettings;
+  // The owner's own taps (paid, or undone = false) win over the automatic Fridays.
+  const settings = useMemo(() => {
+    if (!demo) return liveSettings;
+    const paid = { ...demoPaidWeeks.paid, ...demoState.paid };
+    for (const k of Object.keys(paid)) if (!paid[k]) delete paid[k];
+    return { ...demoState, paid, paidChecks: demoPaidWeeks.paidChecks };
+  }, [demo, liveSettings, demoState, demoPaidWeeks]);
 
   const addEmployee = useCallback(async (emp) => {
     if (demo) {
@@ -97,7 +126,8 @@ export function usePayroll({ demo = false, foremen = [] } = {}) {
       const at = new Date().toISOString();
       setDemoState(s => {
         const next = { ...s.paid };
-        for (const id of empIds) { if (paid) next[`${id}@${weekStart}`] = at; else delete next[`${id}@${weekStart}`]; }
+        // false (not delete) so an undone week isn't paid again by the automatic Fridays.
+        for (const id of empIds) next[`${id}@${weekStart}`] = paid ? at : false;
         return { ...s, paid: next };
       });
       return;

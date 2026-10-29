@@ -148,7 +148,7 @@ function PayHistory({ employee, data, today, onStub, onPaid }) {
               <td className="num strong">{money(w.gross, true)}</td>
               <td>
                 {w.paidAt
-                  ? <button type="button" className="pay-paid" title="Undo paid" onClick={() => onPaid(w.weekStart, false)}>✓ Paid {shortDate(w.paidAt)}</button>
+                  ? <button type="button" className="pay-paid" title="Undo paid" onClick={() => onPaid(w.weekStart, false)}>✓ Paid {shortDate(w.paidAt)}{w.checkNo ? ` · #${w.checkNo}` : ''}</button>
                   : <button type="button" className="pay-mark" onClick={() => onPaid(w.weekStart, true)}>Mark paid</button>}
               </td>
               <td><button type="button" className="btn-ghost pay-stub-btn" onClick={() => onStub(w, ytdThrough(w.weekStart))}>🧾 Stub</button></td>

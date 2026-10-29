@@ -129,7 +129,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
   const logExpense    = demoOn ? noop : liveExpenses.logExpense;
   const rejectExpense = demoOn ? noop : liveExpenses.rejectExpense;
   const delays        = demoOn ? sim.delays : liveDelays;
-  const payroll       = usePayroll({ demo: demoOn, foremen: demoOn ? sim.technicians : [] });
+  const payroll       = usePayroll({ demo: demoOn, foremen: demoOn ? sim.technicians : [], today: demoOn ? sim.date : undefined });
   const shifts        = demoOn ? sim.shifts : liveShifts; // rolled out → back at yard
   const payments      = demoOn ? sim.payments : livePayments;
   const sendStatementsFn = demoOn ? sim.sendStatements : live.sendStatements;

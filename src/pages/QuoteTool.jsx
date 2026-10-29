@@ -63,6 +63,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
   };
   const advance = async () => {
     if (!wanted.length) { setShowWantedError(true); return; }
+    if (!form.name.trim() || !form.phone.trim()) { setLookup({ state: 'need-contact', msg: 'Add your name and phone first.' }); return; }
     if (!form.address) return;
     setLookup({ state: 'loading', msg: '' });
     // Exact house from the suggestions: no need to look it up again.
@@ -293,7 +294,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       <div style={{ maxWidth: '720px' }}>
         <h1 style={{ fontSize: '36px', fontWeight: 800, marginBottom: '8px' }}>Get a Free Quote</h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '16px', lineHeight: 1.6, marginBottom: '20px' }}>
-          Pick what you need and enter your address. We'll find your property on the satellite map, and {COMPANY_INFO.shortName} gets back to you with a price.
+          Tell us what you need and how to reach you, then enter your address. We'll find your property on the satellite map, and {COMPANY_INFO.shortName} gets back to you with a price.
         </p>
         <Steps current={1} />
         <form className="card" onSubmit={findProperty} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -313,6 +314,11 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             </div>
             {showWantedError && <div style={{ color: '#ff7b72', fontSize: '13px', marginTop: '6px' }}>Pick at least one service.</div>}
           </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '14px' }}>
+            <Field label="Your name"><input className="form-input" name="name" value={form.name} onChange={change} placeholder="John Smith" autoComplete="name" required /></Field>
+            <Field label="Phone"><input className="form-input" type="tel" name="phone" value={form.phone} onChange={change} placeholder="(313) 555-0000" autoComplete="tel" required /></Field>
+          </div>
+          <Field label="Email (optional)"><input className="form-input" type="email" name="email" value={form.email} onChange={change} placeholder="you@example.com" autoComplete="email" /></Field>
           <Field label="Your address">
             <AddressInput
               value={form.address}
@@ -322,6 +328,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
               required
             />
           </Field>
+          {lookup.state === 'need-contact' && <div style={{ color: '#ff7b72', fontSize: '13px' }}>{lookup.msg}</div>}
           {lookup.state === 'error' && (
             <div style={{ background: '#da363322', border: '1px solid #da363355', borderRadius: '8px', padding: '12px 16px', color: '#ff7b72', fontSize: '14px' }}>
               {lookup.msg}{' '}
@@ -415,10 +422,6 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           </div>
 
           <form ref={contactRef} className="card quote-contact" onSubmit={sendQuote} style={{ padding: '18px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>Where should {COMPANY_INFO.shortName} reach you?</h3>
-            <Field label="Your name"><input className="form-input" name="name" value={form.name} onChange={change} placeholder="John Smith" autoComplete="name" required /></Field>
-            <Field label="Phone"><input className="form-input" type="tel" name="phone" value={form.phone} onChange={change} placeholder="(313) 555-0000" autoComplete="tel" required /></Field>
-            <Field label="Email (optional)"><input className="form-input" type="email" name="email" value={form.email} onChange={change} placeholder="you@example.com" autoComplete="email" /></Field>
             <Field label="Anything we should know? (optional)">
               <textarea className="form-input" rows={2} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Gate code, dogs, new beds, mulch…" style={{ resize: 'vertical' }} />
             </Field>
@@ -434,12 +437,11 @@ export default function QuoteTool({ setPage, initialServiceId }) {
         </div>
       </div>
 
-      {/* Phones: one button stays on screen under the map. */}
+      {/* Phones: Send stays on screen under the map (hidden once the card's own Send shows). */}
       {!contactInView && <div className="quote-sticky">
-        <span>{outline.state === 'busy' ? 'Finding your lawn…' : zones.length ? `${zones.length} area${zones.length === 1 ? '' : 's'} outlined` : 'Outline your lawn, or just send it'}</span>
-        <button className="btn-primary" type="button"
-          onClick={() => contactRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
-          Next: your info ↓
+        <span>{outline.state === 'busy' ? 'Finding your lawn…' : submit.state === 'error' ? submit.msg : zones.length ? `${zones.length} area${zones.length === 1 ? '' : 's'} outlined` : 'Outline your lawn, or just send it'}</span>
+        <button className="btn-primary" type="button" onClick={sendQuote} disabled={submit.state === 'loading' || outline.state === 'busy'}>
+          {submit.state === 'loading' ? 'Sending…' : 'Send →'}
         </button>
       </div>}
     </div>
@@ -456,7 +458,7 @@ function Field({ label, children }) {
 }
 
 function Steps({ current }) {
-  const steps = ['Address', 'Your Yard & Info'];
+  const steps = ['Your Info', 'Your Yard'];
   return (
     <div style={{ display: 'flex', gap: '8px', margin: '10px 0 16px', flexWrap: 'wrap' }}>
       {steps.map((s, i) => {

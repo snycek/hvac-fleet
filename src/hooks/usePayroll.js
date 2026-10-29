@@ -14,6 +14,15 @@ export const CUTTERS_PER_CREW = 2; // 5 made labor cost more than the lawns bill
 function demoCrew(foreman, index) {
   // Plow trucks: just the driver.
   if (foreman.kind === 'plow') return [{ id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: 26, active: true }];
+  // Landscaping: the foreman plus General Labor.
+  if (foreman.kind === 'landscape') {
+    return [
+      { id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: 25, active: true },
+      { id: `demo-emp-${foreman.id}-l0`, name: 'Hector Ruiz', role: 'laborer', crewId: foreman.id, rate: 18, active: true },
+      { id: `demo-emp-${foreman.id}-l1`, name: 'Dante Webb', role: 'laborer', crewId: foreman.id, rate: 17, active: true },
+      { id: `demo-emp-${foreman.id}-l2`, name: 'Pedro Vega', role: 'laborer', crewId: foreman.id, rate: 17, active: true },
+    ];
+  }
   return [
     { id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: 24, active: true },
     ...Array.from({ length: CUTTERS_PER_CREW }, (_, i) => {

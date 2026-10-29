@@ -1,3 +1,4 @@
+import { crewInfo } from '../lib/crews.js';
 import { Fragment, useMemo, useState } from 'react';
 import { addDays, todayString } from '../lib/dates.js';
 import { money } from '../lib/lawns.js';
@@ -62,9 +63,9 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
         const people = employees.filter(e => e.crewId === crew.id && e.active !== false);
         const foreman = people.find(e => e.role === 'foreman');
         const cutters = people.filter(e => e.role !== 'foreman');
-        // Plow trucks: a driver plus shovelers (mowers: a foreman plus cutters).
-        const plow = crew.kind === 'plow';
-        const helper = plow ? 'shoveler' : 'cutter';
+        // Mowers: foreman + cutters. Plows: driver + shovelers. Landscaping: foreman + General Labor.
+        const info = crewInfo(crew);
+        const helper = info.helperRole;
         const form = adding[crew.id] || { name: '', rate: '16' };
         const setForm = patch => setAdding(a => ({ ...a, [crew.id]: { ...form, ...patch } }));
         const submit = async e => {
@@ -91,7 +92,7 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
                       onKeyDown={ev => { if (ev.key === 'Enter') ev.currentTarget.blur(); if (ev.key === 'Escape') setEditingName(null); }} />
                   ) : (
                     <button type="button" className="roster-name" onClick={() => setEditingName(e.id)} title="Rename">
-                      {e.name}{e.role === 'foreman' && <span className="role-chip">{plow ? 'Driver' : 'Foreman'}</span>}
+                      {e.name}{e.role === 'foreman' && <span className="role-chip">{info.lead}</span>}
                     </button>
                   )}
                   <RateInput value={e.rate} label={`${e.name} hourly rate`} onSave={rate => onUpdate(e.id, { rate })} />
@@ -109,8 +110,8 @@ function Roster({ crews, employees, onAdd, onUpdate }) {
               ))}
             </ul>
             <form className="roster-add" onSubmit={submit}>
-              <input placeholder={`Add ${helper}…`} value={form.name} onChange={e => setForm({ name: e.target.value })} aria-label={`New ${helper} for ${crew.name}`} />
-              <span className="pay-rate">$<input inputMode="decimal" value={form.rate} onChange={e => setForm({ rate: e.target.value.replace(/[^\d.]/g, '') })} aria-label={`New ${helper} rate`} /></span>
+              <input placeholder={`Add ${info.helper}…`} value={form.name} onChange={e => setForm({ name: e.target.value })} aria-label={`New ${info.helper} for ${crew.name}`} />
+              <span className="pay-rate">$<input inputMode="decimal" value={form.rate} onChange={e => setForm({ rate: e.target.value.replace(/[^\d.]/g, '') })} aria-label={`New ${info.helper} rate`} /></span>
               <button type="submit" className="btn-primary" disabled={!form.name.trim()}>Add</button>
             </form>
           </section>
@@ -255,7 +256,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
                 return (
                   <Fragment key={crew.id}>
                     <tr className="crew-row">
-                      <td colSpan={2}>{crew.kind === 'plow' ? '❄️' : '🚜'} {crew.name}'s crew <span>· {crew.truckName || 'Truck'} · {crewRows.length}</span></td>
+                      <td colSpan={2}>{crewInfo(crew).icon} {crew.name}'s crew <span>· {crew.truckName || 'Truck'} · {crewRows.length}</span></td>
                       {week.map(d => <td key={d} />)}
                       <td>{fmtHours(Math.round(crewHours * 4) / 4)}</td>
                       <td />
@@ -270,7 +271,8 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
                         <td className="left">
                           <button type="button" className="pay-toggle" aria-expanded={open} onClick={() => setOpenPerson(open ? null : r.employee.id)} title="Pay history & stubs">{open ? '▾' : '▸'}</button>
                           <span className="pay-name">{r.employee.name}</span>
-                          {r.employee.role === 'foreman' && <span className="role-chip">{crew.kind === 'plow' ? 'Driver' : 'Foreman'}</span>}
+                          {r.employee.role === 'foreman' && <span className="role-chip">{crewInfo(crew).lead}</span>}
+                          {r.employee.role === 'laborer' && <span className="role-chip labor">General Labor</span>}
                         </td>
                         <td><RateInput value={r.employee.rate} label={`${r.employee.name} rate`} onSave={rate => updateEmployee(r.employee.id, { rate })} /></td>
                         {r.days.map(day => (

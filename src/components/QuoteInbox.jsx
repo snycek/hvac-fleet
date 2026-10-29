@@ -6,6 +6,8 @@ import { arrivalMessage } from '../lib/notify.js';
 import { formatPrice, formatSqFt } from '../lib/zones.js';
 import { REPEAT_OPTIONS, addDays, formatDay, todayString } from '../lib/dates.js';
 import { bestPerDay, fmtMiles } from '../lib/routeFit.js';
+import { crewKind, isLandscapingJob, wantsLandscaping } from '../lib/crews.js';
+import LandscapeQuoteModal from './LandscapeQuoteModal.jsx';
 
 const street = a => String(a || '').split(',')[0];
 
@@ -28,8 +30,9 @@ function requestedServices(job) {
 }
 
 const isSnow = job => requestedServices(job).includes('Snow Removal');
-// Snow jobs go to plow drivers; everything else to lawn foremen.
-const crewFor = (job, techs) => techs.filter(t => (t.kind === 'plow') === isSnow(job));
+// Snow jobs go to plow drivers; mowing etc. to lawn foremen (landscaping is priced separately).
+const crewFor = (job, techs) => techs.filter(t => crewKind(t) === (isSnow(job) ? 'plow' : 'lawn'));
+const usd = n => `$${Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
 
 function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoutes, today = todayString() }) {
   const requested = requestedServices(job);
@@ -201,8 +204,11 @@ function AddCustomerModal({ job, foremen: allForemen, onSave, onClose, planRoute
   );
 }
 
-function QuoteCard({ job, onAdd, onDecline, now }) {
+function QuoteCard({ job, onAdd, onDecline, onPriceLand, now }) {
   const requested = requestedServices(job);
+  // Landscaping: John prices it and it goes back to the customer to accept.
+  const land = wantsLandscaping(job);
+  const landOnly = isLandscapingJob(job);
   const first = job.clientName.split(' ')[0];
   const smsBody = encodeURIComponent(`Hi ${first}, this is ${COMPANY_INFO.name} about your quote for ${requested.join(', ').toLowerCase() || 'lawn service'}.`);
   const quote = job.quote;
@@ -220,7 +226,7 @@ function QuoteCard({ job, onAdd, onDecline, now }) {
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(quote.estimate)) : '—'}</div>
+          <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--accent-teal)' }}>{landOnly ? '🌳 You price it' : quote ? (quote.estimate == null ? '❄️ You price it' : formatPrice(quote.estimate)) : '—'}</div>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{quote ? `${formatSqFt(quote.totalSqFt)} · quoted ${timeAgo(job.createdAt, now)}` : `Not measured · ${timeAgo(job.createdAt, now)}`}</div>
         </div>
       </div>
@@ -254,15 +260,22 @@ function QuoteCard({ job, onAdd, onDecline, now }) {
         <a className="btn-ghost" href={`sms:${digits(job.clientPhone)}?&body=${smsBody}`} style={{ textDecoration: 'none', padding: '9px 14px', fontSize: '13px' }}>💬 Text</a>
         <span style={{ flex: 1 }} />
         <button type="button" className="btn-ghost" onClick={onDecline} style={{ padding: '9px 14px', fontSize: '13px', color: '#ff7b72' }}>Decline</button>
-        <button type="button" className="btn-primary quote-add" onClick={onAdd} style={{ padding: '9px 18px', fontSize: '13px' }}>✓ Add Customer</button>
+        {land && (
+          <button type="button" className={`${landOnly ? 'btn-primary' : 'btn-ghost'} land-price`} onClick={onPriceLand} style={{ padding: '9px 16px', fontSize: '13px' }}
+            title="Price the landscaping and send it to them to accept">🌳 Price & send quote</button>
+        )}
+        {!landOnly && <button type="button" className="btn-primary quote-add" onClick={onAdd} style={{ padding: '9px 18px', fontSize: '13px' }} title={land ? `Add them for ${requested.filter(s => !/^landscaping/i.test(s)).join(', ')}` : undefined}>✓ Add Customer</button>}
       </div>
     </div>
   );
 }
 
 /** New quotes waiting for a yes/no (part of the owner's To-Do). */
-export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today }) {
+export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob, planRoutes, today, sendLandscapeQuote, acceptLandscapeQuote }) {
   const [adding, setAdding] = useState(null);
+  const [pricing, setPricing] = useState(null); // landscaping request being priced
+  const sent = jobs.filter(j => j.status === 'quote_sent').sort((a, b) => String(b.offer?.sentAt).localeCompare(String(a.offer?.sentAt)));
+  const landCrews = technicians.filter(t => crewKind(t) === 'landscape' && t.status !== 'pending_approval');
   const [toast, setToast] = useState('');
   const quotes = jobs.filter(j => j.status === 'quote').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   const foremen = technicians.filter(t => t.status !== 'pending_approval');
@@ -286,7 +299,23 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
     flash(`${job.clientName} added — first cut ${formatDay(plan.scheduledDate)} with ${foreman?.name || 'your foreman'}${plan.slot ? ', slotted into the route' : ''}.`);
   };
 
-  if (!quotes.length && !toast && !adding) return null;
+  const handleSendLand = async plan => {
+    const job = pricing;
+    await sendLandscapeQuote(job.id, plan);
+    flash(`Quote sent to ${job.clientName} by ${plan.channel === 'email' ? 'email' : 'text'} · ${usd(plan.items.reduce((s, i) => s + i.amount, 0))}. You'll see it here until they answer.`);
+  };
+  const handleAccepted = async job => {
+    if (!window.confirm(`Mark ${job.clientName}'s quote accepted? It goes on the landscaping schedule for ${formatDay(job.offer?.startDate)}.`)) return;
+    await acceptLandscapeQuote(job.id);
+    flash(`${job.clientName} accepted · on the schedule ${formatDay(job.offer?.startDate)}.`);
+  };
+  const handleWithdraw = async job => {
+    if (!window.confirm(`Withdraw ${job.clientName}'s quote? Their link will say it's no longer available.`)) return;
+    await declineJob(job.id);
+    flash(`Withdrew ${job.clientName}'s quote.`);
+  };
+
+  if (!quotes.length && !sent.length && !toast && !adding && !pricing) return null;
 
   return (
     <div>
@@ -303,9 +332,35 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
       {quotes.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
           {quotes.map(job => (
-            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} />
+            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} />
           ))}
         </div>
+      )}
+
+      {sent.length > 0 && (
+        <div className="quotes-sent">
+          <h3>🌳 Quotes sent · waiting on the customer · {sent.length}</h3>
+          {sent.map(job => (
+            <div key={job.id} className="quote-sent-row">
+              <div style={{ minWidth: 0, flex: '1 1 200px' }}>
+                <div><b>{job.clientName}</b> · {String(job.address || '').split(',')[0]}</div>
+                <div className="cust-dim" style={{ fontSize: '12px' }}>
+                  {(job.offer?.items || []).map(i => i.label).join(', ')} · sent by {job.offer?.channel === 'email' ? 'email' : 'text'} {timeAgo(job.offer?.sentAt, now)} · start {formatDay(job.offer?.startDate)}
+                </div>
+              </div>
+              <b className="quote-sent-amt">{usd(job.offer?.total)}</b>
+              <div className="quote-sent-actions">
+                <button type="button" className="btn-ghost" onClick={() => handleAccepted(job)} title="They said yes on the phone">✓ They said yes</button>
+                <button type="button" className="btn-ghost" onClick={() => setPricing(job)}>Edit & resend</button>
+                <button type="button" className="btn-ghost" onClick={() => handleWithdraw(job)} style={{ color: '#ff7b72' }}>Withdraw</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {pricing && (
+        <LandscapeQuoteModal job={pricing} crews={landCrews} onSend={handleSendLand} onClose={() => setPricing(null)} today={today} />
       )}
 
       {adding && (

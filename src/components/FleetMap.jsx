@@ -4,6 +4,7 @@ import L from 'leaflet';
 import { TECH_STATUS, statusOf } from '../lib/constants.js';
 import { jobDay, lawnKey, lawnStats } from '../lib/lawns.js';
 import { todayString } from '../lib/dates.js';
+import { crewInfo, crewKind } from '../lib/crews.js';
 
 // Fix Leaflet default icon URLs broken by Vite
 delete L.Icon.Default.prototype._getIconUrl;
@@ -59,7 +60,39 @@ function makePlowIcon(status, name) {
 </svg>`;
   return L.divIcon({ html: svg, className: '', iconSize: [72, 52], iconAnchor: [36, 50], popupAnchor: [0, -54] });
 }
-const iconFor = tech => (tech.kind === 'plow' ? makePlowIcon : makeVanIcon)(tech.status, tech.name);
+// Pickup towing a trailer with a shrub on it (landscaping crew). Dirt flying while working.
+function makeLandscapeIcon(status, name) {
+  const color = STATUS_COLORS[status] || '#8b949e';
+  const cab = CAB_COLORS[color] || '#444';
+  const initials = name.split(' ').map(n => n[0]).join('');
+  const dirt = status === 'busy' ? `
+  <circle cx="8" cy="30" r="1.8" fill="#a16207"/><circle cx="4" cy="25" r="1.4" fill="#ca8a04"/><circle cx="11" cy="23" r="1.3" fill="#a16207"/>` : '';
+  const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="52" viewBox="0 0 80 52">
+  <ellipse cx="40" cy="50" rx="34" ry="3" fill="rgba(0,0,0,0.3)"/>
+  ${dirt}
+  <!-- Trailer with a shrub + mulch -->
+  <rect x="3" y="33" width="26" height="6" rx="1" fill="#6b7280"/>
+  <path d="M5,33 Q9,27 14,31 Q17,26 22,31 Q26,29 27,33 Z" fill="#7c4a1e"/>
+  <circle cx="16" cy="22" r="7" fill="#22c55e"/><circle cx="11" cy="26" r="5" fill="#16a34a"/><circle cx="21" cy="26" r="5" fill="#15803d"/>
+  <rect x="15" y="27" width="2" height="6" fill="#7c4a1e"/>
+  <rect x="29" y="35" width="6" height="2" fill="#3a3f47"/>
+  <circle cx="16" cy="42" r="5" fill="#15171c"/><circle cx="16" cy="42" r="2" fill="#9aa4b2"/>
+  <!-- Pickup -->
+  <path d="M35,28 L52,28 L52,40 L35,40 Z" fill="${color}"/>
+  <path d="M52,18 Q52,16 54,16 L62,16 Q65,16 67,20 L70,27 L74,28 Q77,29 77,32 L77,40 L52,40 Z" fill="${color}"/>
+  <path d="M55,19 L62,19 Q64,19 65,21 L67,26 L55,26 Z" fill="#bfe3ff" opacity="0.85"/>
+  <rect x="52" y="28" width="25" height="2" fill="${cab}"/>
+  <circle cx="42" cy="41" r="6.5" fill="#15171c"/><circle cx="42" cy="41" r="2.8" fill="#9aa4b2"/>
+  <circle cx="68" cy="41" r="6.5" fill="#15171c"/><circle cx="68" cy="41" r="2.8" fill="#9aa4b2"/>
+  <!-- Foreman badge -->
+  <circle cx="63" cy="8" r="7.5" fill="${color}" stroke="white" stroke-width="2.5"/>
+  <text x="63" y="11" font-size="8" text-anchor="middle" fill="white" font-weight="bold" font-family="sans-serif">${initials}</text>
+</svg>`;
+  return L.divIcon({ html: svg, className: '', iconSize: [80, 52], iconAnchor: [40, 50], popupAnchor: [0, -54] });
+}
+const ICONS = { plow: makePlowIcon, landscape: makeLandscapeIcon };
+const iconFor = tech => (ICONS[crewKind(tech)] || makeVanIcon)(tech.status, tech.name);
 
 function makeVanIcon(status, name) {
   const color    = STATUS_COLORS[status] || '#8b949e';
@@ -136,11 +169,11 @@ function buildPopup(tech, jobs, statusInfo, color, today) {
   const todays = techJobs.filter(j => jobDay(j, today) === today && !['quote', 'declined', 'skipped'].includes(j.status));
   const doneToday = todays.filter(j => j.status === 'completed');
   const dailyEarnings = doneToday.reduce((s, j) => s + (j.earnings || 0), 0);
-  const plow = tech.kind === 'plow';
+  const info = crewInfo(tech);
   // The lawn they're on (cutting first, then driving to, then next up).
   const activeJob = ['in_progress', 'en_route', 'assigned'].map(s => techJobs.find(j => j.status === s)).find(Boolean);
   const lawn = activeJob ? lawnStats(jobs, lawnKey(activeJob)) : null;
-  const doing = { in_progress: '✂️ Cutting', en_route: '🚚 Heading to', assigned: '📅 Next' }[activeJob?.status] || '';
+  const doing = { in_progress: `${info.id === 'lawn' ? '✂️' : info.icon} ${info.working}`, en_route: '🚚 Heading to', assigned: '📅 Next' }[activeJob?.status] || '';
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
   const statusDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:5px;vertical-align:middle"></span>`;
@@ -164,7 +197,7 @@ function buildPopup(tech, jobs, statusInfo, color, today) {
         </div>
         <div style="background:#f5f5f5;border-radius:8px;padding:8px 10px;text-align:center">
           <div style="font-size:16px;font-weight:800;color:#1a5cbf">${doneToday.length}<span style="font-size:11px;color:#888;font-weight:600"> of ${todays.length}</span></div>
-          <div style="font-size:10px;color:#888;margin-top:1px">${plow ? 'Plowed' : 'Cut'} Today</div>
+          <div style="font-size:10px;color:#888;margin-top:1px">${info.done} Today</div>
         </div>
       </div>
 

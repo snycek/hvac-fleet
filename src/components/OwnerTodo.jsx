@@ -8,7 +8,7 @@ import { REMIND_GAP_DAYS, contactsFor, nextReminderDate, pastDueCustomers } from
 import { daysPastDue, dueDateFor } from '../lib/invoices.js';
 import { monthName } from '../lib/billing.js';
 import { housekeepingItems, todoCount } from '../lib/todo.js';
-import { isHeadsUp, lastPaymentContact } from '../lib/notify.js';
+import { notPayment, lastPaymentContact } from '../lib/notify.js';
 
 // Approving cards first, then the ones that decline.
 const TEST_CARD_ORDER = ['4242', '4444', '0005', '1117', '9995', '0002', '0069'];
@@ -73,7 +73,7 @@ function ExpenseToLog({ exp, foreman, onLog, onReject }) {
 
 /** Owner's To-Do: new quotes, foreman expenses to log, and finished cuts not yet paid. */
 // bare: no title row (the hub panel shows its own) and tighter spacing.
-function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck }) {
+function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markPaid, logExpense, rejectExpense, remindCustomer, printInvoice, remindAccounts, openCustomer, planRoutes, hideQuotes = false, today = todayString(), bare = false, settings, statementsReady, onOpenBilling, onOpenQuotes, promiseCheck, settleCheck, sendLandscapeQuote, acceptLandscapeQuote }) {
   // Checks customers said are on the way: John marks each received (paid) or bounced.
   const checks = pendingChecks(jobs);
   const [settling, setSettling] = useState(null);
@@ -129,7 +129,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
   const behind = pastDueCustomers(jobs, today, threshold, settings).filter(matches);
   const accounts = behind.map(c => {
     const contacts = contactsFor(jobs.filter(j => lawnKey(j) === c.key));
-    const pay = contacts.filter(x => !isHeadsUp(x)); // on-the-way texts aren't reminders
+    const pay = contacts.filter(x => !notPayment(x)); // on-the-way texts and quotes aren't reminders
     return { ...c, latest: c.jobs[c.jobs.length - 1], lastReminder: pay[0] || null, reminders: pay.length };
   });
   const shownUnpaid = accounts.flatMap(a => a.jobs);
@@ -437,7 +437,8 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
 
         {/* Quotes: the inbox itself, or (on the hub, where Quotes has its own tab) a pointer to it. */}
         {!hideQuotes ? (
-          <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} />
+          <QuoteInbox jobs={jobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today}
+            sendLandscapeQuote={sendLandscapeQuote} acceptLandscapeQuote={acceptLandscapeQuote} />
         ) : quotes.length > 0 && (
           <div>
             <h3 style={sectionTitle}>Quotes</h3>

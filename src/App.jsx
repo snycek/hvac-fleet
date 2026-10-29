@@ -14,6 +14,7 @@ import ManagerView from './pages/ManagerView.jsx';
 import OwnerView from './pages/OwnerView.jsx';
 import QuoteTool from './pages/QuoteTool.jsx';
 import CustomerPortal from './pages/CustomerPortal.jsx';
+import QuotePage from './pages/QuotePage.jsx';
 import { SERVICE_PAGE_IDS } from './data/services.js';
 
 function AppInner() {
@@ -22,6 +23,7 @@ function AppInner() {
 
   // Scanned the QR on a paper invoice: straight to their account, no site chrome.
   if (window.location.pathname.startsWith('/pay')) return <CustomerPortal />;
+  if (window.location.pathname.startsWith('/quote/')) return <QuotePage />;
 
   // Shareable demo link: the Owner Hub on made-up customers, already playing. No sign-in,
   // and no real data (it never calls the server).

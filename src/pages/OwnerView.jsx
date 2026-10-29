@@ -32,6 +32,7 @@ const TOUR_KEY = 'johnsDemoTourSeen';
 const tourSeen = () => { try { return localStorage.getItem(TOUR_KEY) === '1'; } catch { return false; } };
 import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
+import { lawnCrews, wantsLandscaping } from '../lib/crews.js';
 import { COMPANY_INFO } from '../data/services.js';
 import { billingMode, demoAccountHash, invoiceFor } from '../lib/invoices.js';
 import { usePayroll } from '../hooks/usePayroll.js';
@@ -275,7 +276,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
   // looks at each foreman's scheduled stops over the next 5 weekdays.
   // exclude: a lawn key to leave out (moving that lawn to another day).
   const livePlanRoutes = (job, { exclude = null } = {}) => {
-    const crews = technicians.filter(t => t.kind !== 'plow' && t.status !== 'pending_approval');
+    const crews = lawnCrews(technicians).filter(t => t.status !== 'pending_approval');
     const routes = [];
     for (let i = 1, n = 0; n < 5 && i < 10; i++) {
       const date = addDays(today, i);
@@ -294,9 +295,14 @@ export default function OwnerView({ demoOnly = false } = {}) {
     return rankRoutes(routes, job.location, job.location);
   };
   const planRoutes = demoOn ? sim.planRoutes : livePlanRoutes;
+  // Landscaping quotes: priced by John, sent to the customer to accept.
+  const landQuoteFns = {
+    sendLandscapeQuote: demoOn ? sim.sendLandscapeQuote : live.sendLandscapeQuote,
+    acceptLandscapeQuote: demoOn ? sim.acceptLandscapeQuote : live.acceptLandscapeQuote,
+  };
   // Lawns list: change a lawn's cut day (just the next cut, or their regular day).
   const lawnsMove = {
-    foremen: technicians.filter(t => t.kind !== 'plow' && t.status !== 'pending_approval' && (!demoOn || t.status !== 'offline')),
+    foremen: lawnCrews(technicians).filter(t => t.status !== 'pending_approval' && (!demoOn || t.status !== 'offline')),
     planRoutes,
     pickDate: !demoOn,
     planFor: demoOn ? (l => (l.lawnId ? sim.lawnPlan(l.lawnId) : null)) : null,
@@ -474,7 +480,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
     { targets: ['.phone-tabs button:nth-child(2)', '.dash-col .dash-panel .dash-tabs'], title: "📥 John's To-Do", before: showHub,
       text: 'Everything that needs him: checks to clear, past-due accounts, statements to send, and new quote requests.' },
     { targets: ['.quote-yard'], title: '📝 Quotes arrive already measured',
-      before: () => { showQuotes(); const q = allJobs.find(j => j.status === 'quote'); tourQuote.current = q ? lawnKey(q) : null; },
+      before: () => { showQuotes(); const q = allJobs.find(j => j.status === 'quote' && !wantsLandscaping(j)); tourQuote.current = q ? lawnKey(q) : null; },
       text: "The customer outlined their yard on a satellite map when they asked for a quote. That outline is the geofence: the crew's GPS uses it to know they're at the right lawn. The price comes from the square footage." },
     { targets: ['form.card .fit'], title: '⭐ It suggests the best route', before: openQuoteForm,
       text: "Tapping Add Customer checks every truck's route for the week and suggests the day and stop that adds the least driving. John can change the price, the day, or the truck before approving." },
@@ -524,6 +530,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
     onOpenBilling: () => (isPhone ? setPhoneTab('money') : setLeftTab('billing')),
     onOpenQuotes: () => (isPhone ? setPhoneTab('todo') : setLeftTab('quotes')),
     promiseCheck: demoOn ? sim.promiseCheck : live.promiseCheck, settleCheck: demoOn ? sim.settleCheck : live.settleCheck,
+    ...landQuoteFns,
   };
   const routeTechList = demoOn ? technicians.filter(t => t.status !== 'offline') : technicians;
   const mapEl = (
@@ -686,7 +693,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
             {!collapsed.todo && <div className="dash-panel-body">
               {leftTab === 'quotes' ? (
                 quoteCount ? (
-                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} />
+                  <QuoteInbox jobs={allJobs} technicians={technicians} scheduleJob={scheduleJob} declineJob={declineJob} planRoutes={planRoutes} today={today} {...landQuoteFns} />
                 ) : <div className="cust-empty">✓ No new quote requests. New ones from the website land here.</div>
               ) : leftTab === 'todo' ? (
                 <OwnerTodo

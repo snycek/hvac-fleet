@@ -12,8 +12,10 @@ import { suggestAddresses } from './src/lib/addressSuggest.js';
 import { applyPaymentResult, crewCollect, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from './src/lib/payments.js';
 import { BILLING_DEFAULTS, accountFor, billingSettings, invoiceFor } from './src/lib/invoices.js';
 import { lawnKey } from './src/lib/lawns.js';
-import { headsUpRecord, isHeadsUp, wantsHeadsUp } from './src/lib/notify.js';
+import { headsUpRecord, notPayment, wantsHeadsUp } from './src/lib/notify.js';
 import { COMPANY_INFO } from './src/data/services.js';
+import { CREW_KINDS, EMPLOYEE_ROLES, crewKind, isLandscapingJob } from './src/lib/crews.js';
+import { cleanItems, offerTotal, quoteMessage } from './src/lib/landscape.js';
 import crypto from 'crypto';
 import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
 
@@ -137,10 +139,11 @@ function seedEmployees() {
   const lasts = ['Ramirez', 'Kowalski', 'Hill', 'Brooks', 'Mendoza', 'Price', 'Rossi', 'Grant', 'Flores', 'Wade', 'Nguyen', 'Shaw', 'Haddad', 'Lane', 'Ortiz', 'Cruz', 'Reed', 'Webb', 'Soto', 'Kane', 'Diaz'];
   let n = 0;
   technicians.filter((t) => t.status !== 'pending_approval').forEach((t) => {
-    // Plow trucks run with just the driver.
-    employees.push({ id: `emp-${t.id}`, name: t.name, role: 'foreman', crewId: t.id, rate: t.kind === 'plow' ? 26 : 24, active: true });
-    for (let i = 0; i < (t.kind === 'plow' ? 0 : 3); i++) {
-      employees.push({ id: `emp-c${n}`, name: `${firsts[n % firsts.length]} ${lasts[(n * 5) % lasts.length]}`, role: 'cutter', crewId: t.id, rate: 15 + (n % 4), active: true });
+    // Plow trucks run with just the driver; landscaping = foreman + 2 General Labor.
+    const kind = crewKind(t);
+    employees.push({ id: `emp-${t.id}`, name: t.name, role: 'foreman', crewId: t.id, rate: kind === 'plow' ? 26 : kind === 'landscape' ? 25 : 24, active: true });
+    for (let i = 0; i < (kind === 'plow' ? 0 : kind === 'landscape' ? 2 : 3); i++) {
+      employees.push({ id: `emp-c${n}`, name: `${firsts[n % firsts.length]} ${lasts[(n * 5) % lasts.length]}`, role: CREW_KINDS[kind].helperRole, crewId: t.id, rate: kind === 'landscape' ? 17 + (n % 3) : 15 + (n % 4), active: true });
       n++;
     }
   });
@@ -655,7 +658,7 @@ app.post('/api/payments/charge', (req, res) => {
 const REMIND_EVERY_MS = 7 * 24 * 3600 * 1000;
 function lastReminderAt(key) {
   let last = '';
-  for (const j of jobs) if (lawnKey(j) === key) for (const r of j.reminders || []) if (!isHeadsUp(r) && String(r.at) > last) last = String(r.at);
+  for (const j of jobs) if (lawnKey(j) === key) for (const r of j.reminders || []) if (!notPayment(r) && String(r.at) > last) last = String(r.at);
   return last || null;
 }
 const remindedThisWeek = (key) => { const last = lastReminderAt(key); return last && Date.now() - new Date(last).getTime() < REMIND_EVERY_MS ? last : null; };
@@ -778,6 +781,119 @@ app.put('/api/expenses/:id/reject', (req, res) => {
   return res.json({ ...listItem, hasReceipt: Boolean(receipt) });
 });
 
+// ---- Landscaping quotes ----
+// The owner prices a landscaping request (line items), and it goes to the customer by
+// email (text if there's no email) with a link to accept or decline. A request that also
+// asks for mowing/snow gets split: the landscaping part becomes its own job.
+const originOf = (req) => req.get('origin') || `${req.protocol}://${req.get('host')}`;
+const quoteToken = (id) => portalToken(`quote:${id}`);
+const quoteIdFrom = (token) => { const key = readToken(token); return key && key.startsWith('quote:') ? key.slice(6) : null; };
+const landscapeTrucks = () => technicians.filter((t) => crewKind(t) === 'landscape' && t.status !== 'pending_approval');
+
+app.put('/api/jobs/:id/landscape-quote', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  const job = jobs[idx];
+  if (!['quote', 'quote_sent'].includes(job.status)) return res.status(400).json({ error: 'This request was already handled.' });
+  const items = cleanItems(req.body?.items);
+  if (!items.length) return res.status(400).json({ error: 'Add at least one line with a price.' });
+  const startDate = String(req.body?.startDate || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || startDate < todayString()) return res.status(400).json({ error: 'Pick a start date (today or later).' });
+  const techId = req.body?.techId || landscapeTrucks()[0]?.id || null;
+  if (techId && !landscapeTrucks().some((t) => t.id === techId)) return res.status(400).json({ error: 'Pick a landscaping crew.' });
+
+  let at = idx;
+  let split = false;
+  if (job.status === 'quote' && !isLandscapingJob(job)) {
+    const rest = (job.requested?.length ? job.requested : String(job.service || '').replace(/^Quote:\s*/i, '').split(',').map((s) => s.trim()))
+      .filter((s) => s && !/^landscaping/i.test(s));
+    if (rest.length) {
+      jobs[idx] = { ...job, requested: rest, service: rest.join(', ') };
+      jobs.unshift({ ...job, id: createJobId(), splitFrom: job.id, reminders: [] });
+      at = 0;
+      split = true;
+    }
+  }
+  const target = jobs[at];
+  const email = target.clientEmail || target.email || '';
+  const channel = req.body?.channel === 'text' && target.clientPhone ? 'text' : email ? 'email' : target.clientPhone ? 'text' : 'paper';
+  const to = channel === 'email' ? email : channel === 'text' ? target.clientPhone : '';
+  const now = new Date().toISOString();
+  const offer = {
+    items, total: offerTotal(items), startDate, techId,
+    note: String(req.body?.note || '').trim().slice(0, 600),
+    sentAt: now, channel, version: (target.offer?.version || 0) + 1,
+  };
+  const link = `${originOf(req)}/quote/${quoteToken(target.id)}`;
+  const message = String(req.body?.message || quoteMessage(target, offer, COMPANY_INFO.name)).slice(0, 900).replace('{quoteLink}', link);
+  const record = { id: `qt_${Date.now().toString(36)}_${target.id.replace(/[^\w]/g, '')}`, at: now, kind: 'quote', channel, to, by: 'Owner', message, total: offer.total, delivered: false };
+  jobs[at] = {
+    ...target, status: 'quote_sent', service: 'Landscaping', requested: ['Landscaping'],
+    earnings: offer.total, repeatDays: 0, billing: 'visit', offer,
+    reminders: [...(target.reminders || []), record],
+  };
+  console.log(`[QUOTE] ${channel} → ${target.clientName} ${to}: ${message}`);
+  return res.json({ job: jobs[at], link, ...(split ? { rest: jobs[idx + 1] } : {}) });
+});
+
+// Accept a sent quote: it goes on the landscaping crew's schedule (start date from the quote).
+function acceptLandscapeQuote(idx, by) {
+  const job = jobs[idx];
+  const o = job.offer || {};
+  const techId = o.techId && technicians.some((t) => t.id === o.techId) ? o.techId : landscapeTrucks()[0]?.id || null;
+  const date = o.startDate && o.startDate >= todayString() ? o.startDate : todayString();
+  const now = new Date().toISOString();
+  jobs[idx] = {
+    ...job, status: techId ? 'assigned' : 'pending', assignedTo: techId, scheduledDate: date,
+    earnings: o.total ?? job.earnings, acceptedAt: now,
+    offer: { ...o, answer: 'accepted', answeredAt: now, answeredBy: by },
+  };
+  console.log(`[QUOTE] ${job.clientName} accepted (${by}) · $${o.total} · starts ${date}`);
+  return jobs[idx];
+}
+
+// Owner: the customer said yes on the phone.
+app.post('/api/jobs/:id/landscape-quote/accept', (req, res) => {
+  const idx = jobs.findIndex((j) => j.id === req.params.id);
+  if (idx < 0) return res.status(404).json({ error: 'job not found' });
+  if (jobs[idx].status !== 'quote_sent') return res.status(400).json({ error: 'That quote is not waiting on the customer.' });
+  return res.json(acceptLandscapeQuote(idx, 'owner'));
+});
+
+// Customer: the quote behind the emailed link (no sign-in; the link is signed).
+const quoteView = (job) => ({
+  status: job.status === 'quote_sent' ? 'quote_sent' : job.offer?.answer === 'accepted' ? 'accepted' : job.status === 'declined' ? 'declined' : 'closed',
+  customer: { name: job.clientName, address: job.address },
+  company: COMPANY_INFO.name,
+  offer: job.offer ? { items: job.offer.items, total: job.offer.total, startDate: job.offer.startDate, note: job.offer.note } : null,
+  scheduledDate: job.scheduledDate || null,
+});
+const quoteByToken = (req, res) => {
+  const id = quoteIdFrom(req.params.token);
+  const idx = id ? jobs.findIndex((j) => j.id === id) : -1;
+  if (idx < 0 || !jobs[idx].offer) { res.status(404).json({ error: "We couldn't find that quote. Give us a call and we'll sort it out." }); return -1; }
+  return idx;
+};
+app.get('/api/portal/quote/:token', (req, res) => {
+  const idx = quoteByToken(req, res);
+  if (idx >= 0) res.json(quoteView(jobs[idx]));
+});
+app.post('/api/portal/quote/:token/accept', (req, res) => {
+  const idx = quoteByToken(req, res);
+  if (idx < 0) return;
+  if (jobs[idx].status !== 'quote_sent') return res.status(400).json({ error: 'This quote was already answered.', quote: quoteView(jobs[idx]) });
+  res.json(quoteView(acceptLandscapeQuote(idx, 'customer')));
+});
+app.post('/api/portal/quote/:token/decline', (req, res) => {
+  const idx = quoteByToken(req, res);
+  if (idx < 0) return;
+  if (jobs[idx].status !== 'quote_sent') return res.status(400).json({ error: 'This quote was already answered.', quote: quoteView(jobs[idx]) });
+  const now = new Date().toISOString();
+  jobs[idx] = { ...jobs[idx], status: 'declined', declinedAt: now, declinedBy: 'customer', offer: { ...jobs[idx].offer, answer: 'declined', answeredAt: now, answeredBy: 'customer', reason: String(req.body?.reason || '').slice(0, 300) } };
+  console.log(`[QUOTE] ${jobs[idx].clientName} declined`);
+  res.json(quoteView(jobs[idx]));
+});
+
 app.put('/api/jobs/:id/decline', (req, res) => {
   const idx = jobs.findIndex((j) => j.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'job not found' });
@@ -894,7 +1010,7 @@ const cleanEmployee = (body, base = {}) => {
   if (body.name !== undefined) out.name = String(body.name).trim().slice(0, 60);
   if (body.rate !== undefined) out.rate = Math.max(0, Math.min(500, Math.round(Number(body.rate) * 100) / 100 || 0));
   if (body.crewId !== undefined && technicians.some((t) => t.id === body.crewId)) out.crewId = body.crewId;
-  if (body.role !== undefined && ['foreman', 'cutter', 'shoveler'].includes(body.role)) out.role = body.role;
+  if (body.role !== undefined && EMPLOYEE_ROLES.includes(body.role)) out.role = body.role;
   if (body.active !== undefined) out.active = Boolean(body.active);
   return out;
 };
@@ -1134,6 +1250,17 @@ if (fs.existsSync(distPath)) {
 
 // Load saved data from Firebase before taking requests; first run seeds the database.
 await loadAll({ jobs, technicians, expenses, payments, delays, employees, shifts }, { payroll, billing });
+// Landscaping came after the first launch: make sure there's a landscaping truck and crew
+// (John renames them / adds General Labor in Crew).
+if (!technicians.some((t) => crewKind(t) === 'landscape')) {
+  const seed = mockTechnicians.find((t) => t.kind === 'landscape');
+  if (seed) technicians.push({ ...seed });
+}
+for (const t of technicians.filter((x) => crewKind(x) === 'landscape')) {
+  if (employees.some((e) => e.crewId === t.id)) continue;
+  employees.push({ id: `emp-${t.id}`, name: t.name, role: 'foreman', crewId: t.id, rate: 25, active: true });
+  ['Hector Ruiz', 'Dante Webb'].forEach((name, i) => employees.push({ id: `emp-${t.id}-l${i}`, name, role: 'laborer', crewId: t.id, rate: 17 + i, active: true }));
+}
 await saveNow();
 
 const PORT = process.env.PORT || 3002;

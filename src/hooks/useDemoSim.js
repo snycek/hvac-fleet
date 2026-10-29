@@ -8,6 +8,8 @@ import { bestInsertion, rankRoutes } from '../lib/routeFit.js';
 import { applyPaymentResult, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from '../lib/payments.js';
 import { headsUpRecord, wantsHeadsUp } from '../lib/notify.js';
 import { COMPANY_INFO } from '../data/services.js';
+import { cleanItems, demoQuoteHash, offerTotal, quoteMessage } from '../lib/landscape.js';
+import { isLandscapingJob } from '../lib/crews.js';
 
 // Owner demo: two trucks working ZIP 48101 on a weekly cycle (Mon–Fri, 16 lawns
 // per truck per day). Each truck drives real road paths "En Route", switches to
@@ -54,6 +56,87 @@ const PLOWS = [
   { id: 'demo-plow-3', name: 'Bo Jensen', truckName: 'Plow 3', kind: 'plow' },
 ];
 const lotById = Object.fromEntries(plowData.lots.map(l => [l.id, l]));
+
+// ---- Landscaping: one truck (foreman + General Labor) doing 1–2 projects a day ----
+const LAND = { id: 'demo-land-1', name: 'Carlos Mendez', truckName: 'Landscape 1', kind: 'landscape' };
+const LAND_SECONDS = 12;      // on-screen work time per project at 1× (a cut is 3)
+const landMinutes = key => 150 + (hash(`${key}%`) % 7) * 20; // 2½–4½ hrs on site
+const LAND_PLANS = [
+  { label: 'Front beds redone: fresh mulch + new shrubs', items: [['Mulch, 6 yards', 360], ['Shrubs ×4', 280], ['Labor', 420]] },
+  { label: 'New sod in the back yard', items: [['Sod, 1,200 sq ft', 900], ['Grading & prep', 350], ['Labor', 480]] },
+  { label: 'Stone edging + river rock beds', items: [['Stone edging', 540], ['River rock', 310], ['Labor', 380]] },
+  { label: 'Cleanup + fresh mulch', items: [['Bed cleanup', 180], ['Mulch, 4 yards', 240], ['Haul away', 95]] },
+];
+// One project job at an existing customer's house (quoted and accepted two weeks back).
+function landJob(lawn, date) {
+  const id = `land-${lawn.id}@${date}`;
+  const plan = LAND_PLANS[hash(id) % LAND_PLANS.length];
+  const items = plan.items.map(([label, base]) => ({ label, amount: base + (hash(id + label) % 8) * 25 }));
+  const total = items.reduce((s, i) => s + i.amount, 0);
+  return {
+    ...baseJob(lawn), id, lawnId: null, service: 'Landscaping', requested: ['Landscaping'],
+    assignedTo: LAND.id, earnings: total, repeatDays: 0, billing: 'visit', notes: plan.label,
+    status: 'assigned', scheduledDate: date, createdAt: iso(at(addDays(date, -14), 9)),
+    offer: { items, total, startDate: date, techId: LAND.id, answer: 'accepted', sentAt: iso(at(addDays(date, -15), 18)) },
+  };
+}
+const landProjectsFor = date => {
+  if (isWinter(date)) return [];
+  const n = 1 + (hash(`landn${date}`) % 2);
+  const picks = [...new Set(Array.from({ length: n }, (_, i) => demo.lawns[hash(`land${i}${date}`) % demo.lawns.length]))];
+  return picks.map(l => landJob(l, date));
+};
+const NO_ROUTE = { stops: [], legs: [] };
+// Today's landscaping stops, nearest-first from the shop (straight lines; roads fill in after).
+function landRouteFor(jobs, date) {
+  const left = jobs.filter(j => j.assignedTo === LAND.id && j.scheduledDate === date && !['completed', 'skipped', 'declined'].includes(j.status) && j.location);
+  const order = [];
+  let from = DEPOT_PT;
+  while (left.length) {
+    left.sort((a, b) => metersBetween([from.lat, from.lng], [a.location.lat, a.location.lng]) - metersBetween([from.lat, from.lng], [b.location.lat, b.location.lng]));
+    const j = left.shift();
+    order.push(j);
+    from = j.location;
+  }
+  const landStops = Object.fromEntries(order.map(j => {
+    const id = j.id.split('@')[0];
+    return [id, { id, name: j.clientName, address: j.address, lat: j.location.lat, lng: j.location.lng, price: j.earnings }];
+  }));
+  const ids = order.map(j => j.id.split('@')[0]);
+  if (!ids.length) return { landRoute: NO_ROUTE, landStops };
+  const pts = [DEPOT_PT, ...ids.map(i => landStops[i]), DEPOT_PT];
+  const legs = pts.slice(1).map((p, i) => straightLeg(pts[i], p, i < ids.length ? ids[i] : 'depot'));
+  return { landRoute: { stops: ids, legs, date }, landStops };
+}
+function landGas(date) {
+  const amount = 58 + (hash(`${date}land`) % 2400) / 100;
+  return { id: `gas-land-${date}`, techId: LAND.id, category: 'gas', amount: Math.round(amount * 100) / 100, date, note: ['Speedway', 'Marathon', 'Shell'][hash(date + 'l') % 3], status: 'logged', hasReceipt: false };
+}
+// A sent quote the customer accepted: on the landscaping schedule from its start date
+// (never before `from`; weekends roll to Monday).
+function landAccepted(j, from, by, when) {
+  let date = j.offer?.startDate && j.offer.startDate > from ? j.offer.startDate : from;
+  const wd = (new Date(`${date}T12:00:00`).getDay() + 6) % 7;
+  if (wd > 4) date = addDays(date, 7 - wd);
+  return {
+    ...j, id: `landq-${String(j.id).replace(/[^\w]/g, '').slice(-14)}@${date}`, status: 'assigned', assignedTo: LAND.id, scheduledDate: date,
+    earnings: j.offer?.total ?? j.earnings, repeatDays: 0, billing: 'visit', acceptedAt: when,
+    offer: { ...j.offer, answer: 'accepted', answeredAt: when, answeredBy: by },
+  };
+}
+// A landscaping request waiting in the inbox when the demo starts (John prices it).
+function demoLandQuote(weekStart) {
+  const near = demo.lawns[57 % demo.lawns.length];
+  const [num, ...rest] = near.address.split(' ');
+  return {
+    id: 'quote-land-1', service: 'Landscaping', requested: ['Landscaping'],
+    clientName: 'Rosa Delgado', clientPhone: '(313) 555-3142', clientEmail: 'rosa.delgado@example.com', email: 'rosa.delgado@example.com',
+    address: `${Number(num) + 14} ${rest.join(' ')}`, location: { lat: near.lat + 0.0004, lng: near.lng - 0.0003 },
+    status: 'quote', assignedTo: null, earnings: 0,
+    notes: 'Notes: Front beds are overgrown. Want them redone with fresh mulch, a few new shrubs, and stone edging along the walk.',
+    createdAt: iso(at(weekStart, 7) - 30 * 3600000),
+  };
+}
 export const LOTS = plowData.lots;
 const PLOW_START_HOUR = 4;   // plows roll at 4 AM so lots are clear before opening
 const plowMinutes = key => 20 + (hash(key) % 26); // 20–45 min per lot
@@ -102,9 +185,11 @@ const PLOW_ROUTES = plowData.routes.map(r => ({
   }),
 }));
 
-// Vehicles in a world: lawn trucks first (truckCount of them), then the plows.
-const isPlow = (w, t) => t >= w.truckCount;
-const driverOf = (w, t) => (isPlow(w, t) ? PLOWS[t - w.truckCount] : FOREMEN[t]);
+// Vehicles in a world: lawn trucks first (truckCount of them), then the plows, then the
+// landscaping truck.
+const isPlow = (w, t) => t >= w.truckCount && t < w.truckCount + PLOWS.length;
+const isLand = (w, t) => t === w.truckCount + PLOWS.length;
+const driverOf = (w, t) => (isLand(w, t) ? LAND : isPlow(w, t) ? PLOWS[t - w.truckCount] : FOREMEN[t]);
 // Accepted quotes change a weekday route from a date on: custom[`${day}:${truck}`] =
 // [{ from, route }] (the latest one in effect wins). New lawns live in w.extraLawns.
 // An entry with `only` is a one-time change for that date (a lawn moved just this once).
@@ -119,8 +204,8 @@ const routeFor = (custom, day, truck, date) => {
   for (let i = list.length - 1; i >= 0; i--) if (list[i].only === date) return list[i].route;
   return regularRoute(list, day, truck, date);
 };
-const routeOf = (w, t) => (isPlow(w, t) ? PLOW_ROUTES[t - w.truckCount] : routeFor(w.custom, w.day, t, addDays(w.weekStart, w.day)));
-const stopById = (id, w) => lawnById[id] || w?.extraLawns?.[id] || lotById[id];
+const routeOf = (w, t) => (isLand(w, t) ? w.landRoute || NO_ROUTE : isPlow(w, t) ? PLOW_ROUTES[t - w.truckCount] : routeFor(w.custom, w.day, t, addDays(w.weekStart, w.day)));
+const stopById = (id, w) => lawnById[id] || w?.extraLawns?.[id] || lotById[id] || w?.landStops?.[id];
 const DEPOT_PT = { lat: demo.depot.lat, lng: demo.depot.lng };
 
 // A straight-line leg (used until the real road path comes back).
@@ -322,7 +407,8 @@ function jobsForDay(date, day, trucks, w = null) {
     scheduledDate: date,
     createdAt: iso(at(date, 3)),
   }))) : [];
-  return [...lawns, ...lots];
+  const projects = landProjectsFor(date).filter(p => !w?.jobs?.some(j => j.id === p.id));
+  return [...lawns, ...lots, ...projects];
 }
 
 function gasFill(truckIndex, date) {
@@ -399,6 +485,19 @@ function history(weekStart, trucks) {
         if (day === 2 || day === 4) expenses.push(gasFill(t, date));
         shifts.push({ techId: FOREMEN[t].id, date, start: iso(at(date, 8, t * 10)), end: iso(last + 25 * 60000) });
       });
+      // The landscaping crew's projects that day.
+      let landEnd = at(date, 7, 30);
+      landProjectsFor(date).forEach(p => {
+        const startedAt = landEnd + 25 * 60000;
+        landEnd = startedAt + landMinutes(p.id) * 60000;
+        const payOn = addDays(date, payDelay(p.id));
+        const paid = payOn < weekStart;
+        jobs.push({ ...p, status: 'completed', startedAt: iso(startedAt), completedAt: iso(landEnd), payOn, paid, paidAt: paid ? iso(at(payOn, 10)) : null, paymentMethod: paid ? payMethodFor(p.id) : null });
+      });
+      if (landEnd > at(date, 7, 30)) {
+        shifts.push({ techId: LAND.id, date, start: iso(at(date, 7, 30)), end: iso(landEnd + 30 * 60000) });
+        if (day === 2 || day === 4) expenses.push(landGas(date));
+      }
       if (day === 0 && Number(date.slice(8)) <= 7) expenses.push(maintenance(date, trucks));
     }
   }
@@ -406,14 +505,17 @@ function history(weekStart, trucks) {
 }
 
 // Lawn trucks start at 8 (parked all winter); plows start at 4 AM on snow days only.
-const freshTrucks = (date, trucks) => [
+// The landscaping truck rolls at 7:30 when it has a project that day.
+const freshTrucks = (date, trucks, landStops = 0) => [
   ...FOREMEN.slice(0, trucks).map((_, t) => ({ leg: 0, meters: 0, phase: isWinter(date) ? 'done' : 'idle', cutLeft: 0, clock: at(date, 8, t * 10) })),
   ...PLOWS.map((_, p) => ({ leg: 0, meters: 0, phase: isSnowDay(date) ? 'idle' : 'done', cutLeft: 0, clock: at(date, PLOW_START_HOUR, p * 10) })),
+  { leg: 0, meters: 0, phase: landStops > 0 ? 'idle' : 'done', cutLeft: 0, clock: at(date, 7, 30) },
 ];
 // Who's working today: on-duty drivers show Available, the rest Off.
 const crewFor = (date, trucks) => [
   ...FOREMEN.slice(0, trucks).map(f => ({ ...f, status: isWinter(date) ? 'offline' : 'available' })),
   ...PLOWS.map(p => ({ ...p, status: isSnowDay(date) ? 'available' : 'offline' })),
+  { ...LAND, status: isWinter(date) ? 'offline' : 'available' },
 ];
 // Frame the whole ZIP so the boundary is visible.
 const BOUNDS = [
@@ -422,7 +524,7 @@ const BOUNDS = [
 ];
 const OUTLINE = { ring: demo.zipOutline, label: `ZIP ${demo.zip}` };
 
-const depotPositions = (trucks = MAX_TRUCKS) => Array.from({ length: trucks + PLOWS.length }, () => ({ lat: DEPOT[0], lng: DEPOT[1] }));
+const depotPositions = (trucks = MAX_TRUCKS) => Array.from({ length: trucks + PLOWS.length + 1 }, () => ({ lat: DEPOT[0], lng: DEPOT[1] }));
 
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
 // Next date of weekday d after the demo's today (never today's route already running).
@@ -499,6 +601,8 @@ function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), star
   const weekStart = mondayOf(start);
   const raw = withHistory ? history(weekStart, trucks) : { jobs: [], expenses: [], delays: [], shifts: [] };
   const past = { ...raw, jobs: checksStillComing(raw.jobs, weekStart) };
+  const startJobs = [...past.jobs, ...jobsForDay(weekStart, 0, trucks), demoQuote(0, weekStart), demoLandQuote(weekStart)];
+  const land = landRouteFor(startJobs, weekStart);
   return {
     truckCount: trucks,
     start,
@@ -511,13 +615,14 @@ function initialWorld(withHistory = true, trucks = Math.min(2, MAX_TRUCKS), star
     payments: [],
     shifts: past.shifts,
     // New quote requests: one to start, then one more each new week, 3 in all.
-    jobs: [...past.jobs, ...jobsForDay(weekStart, 0, trucks), demoQuote(0, weekStart)],
+    jobs: startJobs,
+    ...land,
     quotesSent: 1,
     custom: {},
     extraLawns: {},
     expenses: past.expenses,
     technicians: crewFor(weekStart, trucks),
-    trucks: freshTrucks(weekStart, trucks),
+    trucks: freshTrucks(weekStart, trucks, land.landRoute.stops.length),
     lastEvent: '',
   };
 }
@@ -610,6 +715,13 @@ export function useDemoSim(start = {}) {
         }
         jobs = books.jobs;
         expenses = books.expenses;
+        // Landscaping quotes sent before today: the customer taps Accept (demo).
+        let acceptedName = '';
+        jobs = jobs.map(j => {
+          if (j.status !== 'quote_sent' || String(j.offer?.sentAt || '').slice(0, 10) >= next) return j;
+          acceptedName = j.clientName;
+          return landAccepted(j, next, 'customer', iso(at(next, 7, 40)));
+        });
         const payments = books.payments;
         if (day === 0 && Number(next.slice(8)) <= 7) expenses = [maintenance(next, w.truckCount), ...expenses];
         if (paidCount) lastEvent = `💵 ${paidCount} paid · +${paidSum}${declined ? ` · ❌ ${declined} declined` : ''}`;
@@ -617,15 +729,19 @@ export function useDemoSim(start = {}) {
         const quotesSent = w.quotesSent ?? QUOTE_SEEDS.length;
         const newQuote = day === 0 && quotesSent < QUOTE_SEEDS.length ? demoQuote(quotesSent, next) : null;
         if (newQuote) lastEvent = `📝 New quote request · ${newQuote.clientName}`;
+        if (acceptedName) lastEvent = `✅ ${acceptedName} accepted the landscaping quote`;
         setPositions(depotPositions(w.truckCount));
+        // (skip any visit that already exists, e.g. a new customer's first cut made when approved)
+        const dayJobs = [...jobs, ...jobsForDay(next, day, w.truckCount, w).filter(nj => !jobs.some(j => j.id === nj.id)), ...(newQuote ? [newQuote] : [])];
+        const land = landRouteFor(dayJobs, next);
         commitWorld({
           ...w, weekStart, day, week, night: 0, expenses, payments, lastEvent,
           dayCount: w.dayCount + 1,
-          // (skip any visit that already exists, e.g. a new customer's first cut made when approved)
-          jobs: [...jobs, ...jobsForDay(next, day, w.truckCount, w).filter(nj => !jobs.some(j => j.id === nj.id)), ...(newQuote ? [newQuote] : [])],
+          jobs: dayJobs,
+          ...land,
           quotesSent: quotesSent + (newQuote ? 1 : 0),
           technicians: crewFor(next, w.truckCount),
-          trucks: freshTrucks(next, w.truckCount),
+          trucks: freshTrucks(next, w.truckCount, land.landRoute.stops.length),
         });
         return;
       }
@@ -636,6 +752,7 @@ export function useDemoSim(start = {}) {
       const trucks = w.trucks.map((s, t) => {
         if (s.phase === 'done') return s;
         const plow = isPlow(w, t);
+        const land = isLand(w, t);
         const route = routeOf(w, t);
         const techId = driverOf(w, t).id;
         const name = driverOf(w, t).name.split(' ')[0];
@@ -680,7 +797,7 @@ export function useDemoSim(start = {}) {
             shifts = shifts.map(x => (x.techId === techId && x.date === today && !x.end ? { ...x, end: iso(home) } : x));
             setTech(techId, { status: 'available' });
             if (plow || w.day === 2 || w.day === 4) {
-              const fill = plow ? plowGas(t - w.truckCount, today) : gasFill(t, today);
+              const fill = land ? landGas(today) : plow ? plowGas(t - w.truckCount, today) : gasFill(t, today);
               expenses = [fill, ...expenses];
               newBursts.push({ id: `${fill.id}-${Date.now()}`, lat: DEPOT[0], lng: DEPOT[1], text: `⛽ −$${fill.amount.toFixed(0)}`, kind: 'expense', at: Date.now() });
             }
@@ -689,7 +806,7 @@ export function useDemoSim(start = {}) {
           // Geofence: close enough to the lawn → start cutting.
           if (metersBetween(p, [target.lat, target.lng]) <= GEOFENCE_M || meters >= leg.length) {
             pos[t] = { lat: target.lat, lng: target.lng };
-            const skipReason = plow ? null : skipFor(jobId);
+            const skipReason = plow || land ? null : skipFor(jobId);
             if (skipReason) {
               // Skipped: not cut, not billed; straight on to the next lawn.
               const at0 = s.clock + leg.seconds * 1000;
@@ -701,7 +818,7 @@ export function useDemoSim(start = {}) {
             }
             setTech(techId, { status: 'busy' });
             setJob(jobId, { status: 'in_progress' });
-            return { ...s, meters, phase: 'cutting', cutLeft: CUT_SECONDS };
+            return { ...s, meters, phase: 'cutting', cutLeft: land ? LAND_SECONDS : CUT_SECONDS };
           }
           return { ...s, meters };
         }
@@ -710,10 +827,11 @@ export function useDemoSim(start = {}) {
         const cutLeft = s.cutLeft - dt;
         if (cutLeft > 0) return { ...s, cutLeft };
         const started = s.clock + leg.seconds * 1000;
-        const finished = started + (plow ? plowMinutes(jobId) : cutMinutes(jobId)) * 60000;
+        const finished = started + (land ? landMinutes(jobId) : plow ? plowMinutes(jobId) : cutMinutes(jobId)) * 60000;
         setJob(jobId, { status: 'completed', startedAt: iso(started), completedAt: iso(finished), paid: false, paidAt: null, payOn: addDays(today, payDelay(jobId)) });
-        newBursts.push({ id: `${jobId}-${Date.now()}`, lat: target.lat, lng: target.lng, text: `${plow ? '❄️ ' : ''}+$${target.price}`, at: Date.now() });
-        lastEvent = `${plow ? '❄️ ' : ''}+$${target.price} · ${target.name}`;
+        const tag = plow ? '❄️ ' : land ? '🌳 ' : '';
+        newBursts.push({ id: `${jobId}-${Date.now()}`, lat: target.lat, lng: target.lng, text: `${tag}+$${target.price}`, at: Date.now() });
+        lastEvent = `${tag}+$${target.price} · ${target.name}`;
         const nextStop = route.legs[s.leg + 1]?.to;
         if (nextStop && nextStop !== 'depot') { setJob(`${nextStop}@${today}`, { status: 'en_route', enRouteAt: iso(finished) }); headsUp(`${nextStop}@${today}`, finished); }
         setTech(techId, { status: 'en_route' });
@@ -974,6 +1092,47 @@ export function useDemoSim(start = {}) {
     return { date, day: wd, truck: t };
   }, [commitWorld, lawnPlan]);
 
+  // ---- Landscaping quotes: John prices it, the customer gets a link (they accept overnight) ----
+  const sendLandscapeQuote = useCallback(async (jobId, plan) => {
+    const w = worldRef.current;
+    const job = w.jobs.find(j => j.id === jobId);
+    if (!job) throw new Error('That request is gone.');
+    const items = cleanItems(plan.items);
+    if (!items.length) throw new Error('Add at least one line with a price.');
+    const now = demoNow();
+    const email = job.clientEmail || job.email || '';
+    const channel = plan.channel === 'text' && job.clientPhone ? 'text' : email ? 'email' : 'text';
+    const offer = { items, total: offerTotal(items), startDate: plan.startDate, techId: LAND.id, note: plan.note || '', sentAt: now, channel, version: (job.offer?.version || 0) + 1 };
+    // Asked for mowing too? The landscaping part becomes its own job; the rest stays a quote.
+    let jobs = w.jobs;
+    let target = job;
+    if (job.status === 'quote' && !isLandscapingJob(job)) {
+      const rest = (job.requested || []).filter(s => !/^landscaping/i.test(s));
+      jobs = jobs.map(j => (j.id === jobId ? { ...j, requested: rest, service: rest.join(', ') } : j));
+      target = { ...job, id: `${job.id}-land` };
+      jobs = [...jobs, target];
+    }
+    const link = `${window.location.origin}/quote/demo#${demoQuoteHash(target, offer, COMPANY_INFO.name)}`;
+    const message = quoteMessage(target, offer, COMPANY_INFO.name).replace('{quoteLink}', link);
+    const rec = { id: `qt_${Date.now().toString(36)}_${String(target.id).replace(/[^\w]/g, '')}`, at: now, kind: 'quote', channel, to: channel === 'email' ? email : job.clientPhone, by: 'Owner', message, total: offer.total, delivered: false };
+    jobs = jobs.map(j => (j.id === target.id ? {
+      ...j, status: 'quote_sent', service: 'Landscaping', requested: ['Landscaping'], earnings: offer.total, repeatDays: 0, billing: 'visit', offer,
+      reminders: [...(j.reminders || []), rec],
+    } : j));
+    commitWorld({ ...w, jobs, lastEvent: `🌳 Quote sent to ${String(job.clientName).split(' ')[0]} · $${offer.total}` });
+    return { link };
+  }, [commitWorld]);
+  // The customer said yes on the phone: on the schedule (from tomorrow at the earliest).
+  const acceptLandscapeQuote = useCallback(async jobId => {
+    const w = worldRef.current;
+    const job = w.jobs.find(j => j.id === jobId);
+    if (!job || job.status !== 'quote_sent') throw new Error('That quote is not waiting on the customer.');
+    const tomorrow = addDays(addDays(w.weekStart, w.day), 1);
+    const accepted = landAccepted(job, tomorrow, 'owner', demoNow());
+    commitWorld({ ...w, jobs: w.jobs.map(j => (j.id === jobId ? accepted : j)), lastEvent: `✅ ${job.clientName} · landscaping on ${accepted.scheduledDate}` });
+    return accepted;
+  }, [commitWorld]);
+
   const declineQuote = useCallback(async jobId => {
     const w = worldRef.current;
     commitWorld({ ...w, jobs: w.jobs.map(j => (j.id === jobId ? { ...j, status: 'declined' } : j)) });
@@ -1001,7 +1160,7 @@ export function useDemoSim(start = {}) {
 
   // Only rebuild these when a job changes, not on every truck movement.
   const todays = useMemo(() => world.jobs.filter(j => j.scheduledDate === date), [world.jobs, date]);
-  const lawns = useMemo(() => todays.map(j => ({ id: j.lawnId || j.lotId, key: lawnKey(j), name: j.clientName, price: j.earnings, lat: j.location.lat, lng: j.location.lng, status: j.status })), [todays]);
+  const lawns = useMemo(() => todays.map(j => ({ id: j.lawnId || j.lotId || j.id, key: lawnKey(j), name: j.clientName, price: j.earnings, lat: j.location.lat, lng: j.location.lng, status: j.status })), [todays]);
   // Parking-lot outlines (the plow geofence) for today's lots.
   const lots = useMemo(() => todays.filter(j => j.lotId).map(j => ({ id: j.lotId, key: lawnKey(j), name: j.clientName, price: j.earnings, ring: lotById[j.lotId].ring, status: j.status })), [todays]);
 
@@ -1037,6 +1196,7 @@ export function useDemoSim(start = {}) {
     planRoutes,
     scheduleQuote,
     lawnPlan, moveLawn,
+    sendLandscapeQuote, acceptLandscapeQuote,
     declineQuote,
     payments: world.payments || [],
     cutToday: todays.filter(j => j.status === 'completed').length,

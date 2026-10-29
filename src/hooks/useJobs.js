@@ -242,6 +242,24 @@ export function useJobs({ live = true } = {}) {
     if (Array.isArray(fresh)) setJobs(fresh);
   }, []);
 
+  // Landscaping: price a request and send it to the customer ({ items, startDate, techId, note, channel }).
+  const sendLandscapeQuote = useCallback(async (jobId, plan) => {
+    const res = await fetch(`/api/jobs/${jobId}/landscape-quote`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't send it (HTTP ${res.status})`);
+    const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
+    if (Array.isArray(fresh)) setJobs(fresh);
+    return data;
+  }, []);
+  // The customer said yes on the phone.
+  const acceptLandscapeQuote = useCallback(async jobId => {
+    const res = await fetch(`/api/jobs/${jobId}/landscape-quote/accept`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save (HTTP ${res.status})`);
+    setJobs(prev => prev.map(j => (j.id === jobId ? data : j)));
+    return data;
+  }, []);
+
   // Owner moves a lawn's next cut: { scheduledDate, techId, mode: 'once' | 'always' }.
   const rescheduleJob = useCallback(async (jobId, plan) => {
     const res = await fetch(`/api/jobs/${jobId}/reschedule`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(plan) });
@@ -278,5 +296,5 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, [reloadJobs]);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
 }

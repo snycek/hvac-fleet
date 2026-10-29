@@ -12,7 +12,7 @@ const usd = n => `$${Number(n || 0).toFixed(2)}`;
 const day = iso => (iso ? new Date(String(iso).length === 10 ? `${iso}T12:00:00` : iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
 const stamp = iso => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
 const CHANNEL = { text: '💬 Text', email: '✉️ Email', paper: '📄 Paper' };
-const contactKind = c => (c.kind === 'heads_up' ? 'on-the-way text (automatic)' : c.kind === 'statement' ? `${c.periodLabel || 'monthly'} statement`
+const contactKind = c => (c.kind === 'heads_up' ? 'on-the-way text (automatic)' : c.kind === 'quote' ? `landscaping quote · $${Number(c.total || 0).toLocaleString()}` : c.kind === 'statement' ? `${c.periodLabel || 'monthly'} statement`
   : c.scope === 'account' ? `account reminder (${c.jobIds.length} visit${c.jobIds.length === 1 ? '' : 's'})` : 'payment reminder');
 
 /**

@@ -288,7 +288,10 @@ export default function TechnicianView() {
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {group.jobs.map(job => {
-              const steps = TRANSITIONS[job.status] || [];
+              // Landscaping jobs: "Start Job" / "Mark Done" instead of cutting words.
+              const steps = (TRANSITIONS[job.status] || []).map(s => (/^landscaping/i.test(String(job.service || ''))
+                ? { ...s, label: s === START ? '🌳 Start Job' : s === MARK_CUT ? '✅ Mark Done' : s.label }
+                : s));
               const cuttingFor = job.status === 'in_progress' && job.startedAt ? Math.max(0, Math.round((Date.now() - new Date(job.startedAt)) / 60000)) : null;
               const isLoading = loadingId === job.id;
               const isExpanded = expandedId === job.id;

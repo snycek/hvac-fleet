@@ -9,6 +9,9 @@ const street = a => String(a || '').split(',')[0];
 export function arrivalMessage(job, companyName) {
   const first = String(job.clientName || '').split(' ')[0] || 'there';
   const snow = job.service === 'Snow Removal' || job.perSnowfall;
+  if (/^landscaping/i.test(String(job.service || ''))) {
+    return `Hi ${first}, ${companyName} here: your landscaping crew is on the way to ${street(job.address)} now. If you can, please leave the driveway open for our trailer. Thanks!`;
+  }
   return snow
     ? `Hi ${first}, ${companyName} here: your plow crew is on the way to ${street(job.address)} now. If you can, please move cars out of the lot so we can clear it all. Thanks!`
     : `Hi ${first}, ${companyName} here: your crew is on the way to ${street(job.address)} now. If you can, please unlock the gate and move any cars or toys off the lawn. Thanks!`;
@@ -17,7 +20,9 @@ export function arrivalMessage(job, companyName) {
 /** A heads-up never counts as a payment reminder (the once-a-week limit). */
 export const isHeadsUp = contact => contact?.kind === 'heads_up';
 /** Latest payment-type contact (reminder or statement) from a newest-first list. */
-export const lastPaymentContact = contacts => (contacts || []).find(c => !isHeadsUp(c)) || null;
+/** Contacts that aren't about money (on-the-way texts, landscaping quotes). */
+export const notPayment = contact => isHeadsUp(contact) || contact?.kind === 'quote';
+export const lastPaymentContact = contacts => (contacts || []).find(c => !notPayment(c)) || null;
 
 /** The log record for one heads-up (null if we have no phone or email for them). */
 export function headsUpRecord(job, companyName, at) {

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { TECH_STATUS, statusOf } from '../lib/constants.js';
 import { todayString } from '../lib/dates.js';
+import { crewInfo } from '../lib/crews.js';
 import { dayShift, hoursMins, jobDay, money, rainMinutes } from '../lib/lawns.js';
 
 const STOP_COLORS = { completed: '#3fb950', in_progress: '#e67e22', en_route: '#9c55f7' };
@@ -42,7 +43,8 @@ const Num = ({ value, label, color }) => (
 
 function TruckCard({ tech, route, selected, onSelect }) {
   const st = statusOf(tech) || TECH_STATUS[tech.status] || { label: tech.status, color: '#8b949e' };
-  const plow = tech.kind === 'plow';
+  const info = crewInfo(tech);
+  const plow = info.id === 'plow';
   const initials = tech.name.split(' ').map(n => n[0]).join('');
   const pct = route.stops.length ? Math.round((route.done / route.stops.length) * 100) : 0;
   const now = route.current;
@@ -70,7 +72,7 @@ function TruckCard({ tech, route, selected, onSelect }) {
 
       {/* Two numbers: lawns cut of today's total, and what's been billed (avg cut lives in Crew Report) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px' }}>
-        <Num value={`${route.done}/${route.left}`} label={plow ? 'Plowed/Left' : 'Cut/Left'} color={route.left ? 'var(--text-primary)' : '#3fb950'} />
+        <Num value={`${route.done}/${route.left}`} label={`${info.done}/Left`} color={route.left ? 'var(--text-primary)' : '#3fb950'} />
         <Num value={money(route.billed)} label="Earned" color="#3fb950" />
       </div>
 
@@ -91,11 +93,11 @@ function TruckCard({ tech, route, selected, onSelect }) {
       <div style={{ fontSize: '12px', lineHeight: 1.45, minWidth: 0 }}>
         {now ? (
           <div style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            <b style={{ color: STOP_COLORS[now.status] }}>{now.status === 'in_progress' ? (plow ? '❄️ Plowing' : '✂️ Cutting') : '🚚 Heading to'}</b>{' '}
+            <b style={{ color: STOP_COLORS[now.status] }}>{now.status === 'in_progress' ? `${info.id === 'lawn' ? '✂️' : info.icon} ${info.working}` : '🚚 Heading to'}</b>{' '}
             {street(now.address)} <span style={{ color: 'var(--text-muted)' }}>· {now.clientName} · {money(now.earnings || 0)}</span>
           </div>
         ) : (
-          <div style={{ color: 'var(--text-muted)' }}>{route.left ? 'Not started' : route.stops.length ? '✅ Route done' : plow ? 'Parked · no snow' : 'No lawns today'}</div>
+          <div style={{ color: 'var(--text-muted)' }}>{route.left ? 'Not started' : route.stops.length ? '✅ Route done' : plow ? 'Parked · no snow' : `No ${info.units} today`}</div>
         )}
         {route.upNext.length > 0 && (
           <div style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -103,7 +105,7 @@ function TruckCard({ tech, route, selected, onSelect }) {
           </div>
         )}
         <div style={{ color: 'var(--text-muted)' }}>
-          ⏱ {hoursMins(route.cutting)} {plow ? 'plowing' : 'cutting'} · {money(route.toBill)} still to {plow ? 'plow' : 'cut'}
+          ⏱ {hoursMins(route.cutting)} {info.working.toLowerCase()} · {money(route.toBill)} still to {plow ? 'plow' : info.id === 'landscape' ? 'finish' : 'cut'}
           {route.rain > 0 && <span style={{ color: '#58a6ff', fontWeight: 600 }}> · 🌧 {hoursMins(route.rain)} rain delay</span>}
           {route.skipped > 0 && <span> · ⏭ {route.skipped} skipped</span>}
         </div>

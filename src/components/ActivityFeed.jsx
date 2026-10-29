@@ -23,7 +23,8 @@ function ActivityFeed({ jobs, expenses, technicians, delays = [], shifts = [], p
       }
       if (j.status === 'completed' && j.completedAt && jobDay(j, today) === today) {
         const plowed = j.service === 'Snow Removal';
-        out.push({ key: `c-${j.id}`, at: j.completedAt, icon: plowed ? '❄️' : '✂️', text: <><b>{first(j.assignedTo)}</b> {plowed ? 'plowed' : 'cut'} {plowed ? j.clientName : street(j.address)}</>, amount: money(j.earnings || 0), tone: 'cut' });
+        const land = /^landscaping/i.test(String(j.service || ''));
+        out.push({ key: `c-${j.id}`, at: j.completedAt, icon: plowed ? '❄️' : land ? '🌳' : '✂️', text: <><b>{first(j.assignedTo)}</b> {plowed ? 'plowed' : land ? 'finished landscaping at' : 'cut'} {plowed ? j.clientName : street(j.address)}</>, amount: money(j.earnings || 0), tone: 'cut' });
       }
       if (j.paid && j.paidAt && dayOf(j.paidAt) === today) {
         const m = METHODS[j.paymentMethod] || METHODS.cash;

@@ -1,5 +1,6 @@
 export const JOB_STATUS = {
   quote:       { label: 'New Quote',   color: '#f0b429' },
+  quote_sent:  { label: 'Quote Sent',  color: '#d29922' },
   pending:     { label: 'Pending',     color: '#d29922' },
   assigned:    { label: 'Assigned',    color: '#1f6feb' },
   en_route:    { label: 'En Route',    color: '#9c55f7' },
@@ -10,7 +11,9 @@ export const JOB_STATUS = {
 };
 
 // Status for a driver: plow trucks say "Plowing" where mowers say "Cutting".
-export const statusOf = tech => (tech?.kind === 'plow' && tech.status === 'busy' ? { ...TECH_STATUS.busy, label: 'Plowing' } : TECH_STATUS[tech?.status]);
+// Landscaping crews say "Working".
+const BUSY_LABEL = { plow: 'Plowing', landscape: 'Working' };
+export const statusOf = tech => (BUSY_LABEL[tech?.kind] && tech.status === 'busy' ? { ...TECH_STATUS.busy, label: BUSY_LABEL[tech.kind] } : TECH_STATUS[tech?.status]);
 
 export const TECH_STATUS = {
   available:        { label: 'Available',        color: '#3fb950' },

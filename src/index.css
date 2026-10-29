@@ -694,6 +694,26 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .fit-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: 6px; }
 .fit-days button { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 7px 4px; border-radius: 8px; border: 2px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; font-weight: 700; font-size: 13px; }
 .fit-days button small { font-weight: 500; font-size: 11px; color: var(--text-muted); }
+/* Landscaping quotes */
+.land-items { display: flex; flex-direction: column; gap: 6px; }
+.land-item { display: grid; grid-template-columns: 1fr 110px auto; gap: 6px; align-items: center; }
+.land-amt { position: relative; }
+.land-amt > span { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 14px; }
+.land-amt input { padding-left: 22px; }
+.land-x { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; padding: 4px 6px; }
+.land-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.land-chips button { background: var(--bg-elevated); border: 1px dashed var(--border); color: var(--text-muted); border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.land-chips button:hover { color: var(--text-primary); border-color: var(--accent-teal); }
+.land-total { display: flex; justify-content: space-between; align-items: baseline; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 14px; }
+.land-total b { font-size: 22px; color: var(--accent-teal); }
+.quotes-sent { margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+.quotes-sent h3 { font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; }
+.quote-sent-row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border: 1px solid #d2992255; background: #d299220d; border-radius: 10px; font-size: 13px; }
+.quote-sent-amt { font-size: 17px; color: var(--accent-teal); }
+.quote-sent-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.quote-sent-actions .btn-ghost { padding: 5px 10px; font-size: 12px; }
+@media (max-width: 520px) { .land-item { grid-template-columns: 1fr 92px auto; } }
+.role-chip.labor { background: #a1620722; color: #d29922; border-color: #a1620755; }
 /* Change a lawn's cut day */
 .move-mode { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .move-mode button { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px; border-radius: 10px; border: 2px solid var(--border); background: var(--bg-elevated); color: var(--text-primary); font-weight: 700; font-size: 14px; cursor: pointer; }
@@ -866,3 +886,11 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 /* Add Customer: "Text before arrival" + the exact message */
 .notify-arrival { display: flex; flex-direction: column; gap: 8px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13px; }
 .notify-preview { font-size: 12.5px; line-height: 1.45; color: var(--text-primary); background: #1f6feb18; border-left: 3px solid #58a6ff; border-radius: 6px; padding: 8px 10px; }
+/* Customer's landscaping quote (/quote/…) */
+.quote-lines li { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; font-size: 15px; }
+.quote-total { display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid #1f6b2b; margin-top: 4px; padding-top: 8px; font-weight: 700; }
+.quote-total .portal-amount { margin: 0; }
+.quote-note { margin-top: 10px; font-size: 14px; background: #f6f8f6; border-radius: 10px; padding: 10px 12px; }
+.quote-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
+.quote-decline { background: #fff; color: #5b6470; border: 1px solid #cfd6cf; border-radius: 12px; padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer; flex: 1; }
+.quote-decline.strong { color: #b42318; border-color: #f1b5ae; }

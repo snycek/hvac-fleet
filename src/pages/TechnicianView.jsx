@@ -10,6 +10,51 @@ import { formatDay, todayString } from '../lib/dates.js';
 import CrewHoursCard from '../components/CrewHoursCard.jsx';
 import { usePayroll } from '../hooks/usePayroll.js';
 import { useShifts } from '../hooks/useShifts.js';
+import { lawnKey } from '../lib/lawns.js';
+
+// Customer paid at the door: check (number optional) or cash. Covers their whole
+// unpaid balance; the owner clears it when the foreman turns it in.
+function GotPaid({ amount, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState('check');
+  const [number, setNumber] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const stop = e => e.stopPropagation();
+  if (!open) {
+    return (
+      <button type="button" className="btn-ghost" onClick={e => { stop(e); setOpen(true); }}
+        style={{ padding: '10px 16px', fontSize: '14px', fontWeight: 600, color: '#3fb950', borderColor: '#3fb95066' }}>
+        💵 Got paid · ${amount.toFixed(0)}
+      </button>
+    );
+  }
+  const save = async e => {
+    stop(e); setErr(''); setBusy(true);
+    try { await onSave(kind, number.trim()); setOpen(false); } catch (ex) { setErr(ex.message); } finally { setBusy(false); }
+  };
+  const pick = on => ({ padding: '10px 14px', fontSize: '14px', fontWeight: 700, flex: 1, ...(on ? { background: '#3fb95022', borderColor: '#3fb950', color: '#3fb950' } : {}) });
+  return (
+    <div onClick={stop} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>They paid you <b style={{ color: 'var(--text-primary)' }}>${amount.toFixed(2)}</b> (their full balance) with:</div>
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button type="button" className="btn-ghost" aria-pressed={kind === 'check'} onClick={() => setKind('check')} style={pick(kind === 'check')}>🧾 Check</button>
+        <button type="button" className="btn-ghost" aria-pressed={kind === 'cash'} onClick={() => setKind('cash')} style={pick(kind === 'cash')}>💵 Cash</button>
+      </div>
+      {kind === 'check' && (
+        <input className="form-input" inputMode="numeric" placeholder="Check # (optional)" aria-label="Check number" value={number} onChange={e => setNumber(e.target.value.slice(0, 12))} />
+      )}
+      {err && <div style={{ color: '#ff7b72', fontSize: '13px' }}>{err}</div>}
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button type="button" className="btn-primary" disabled={busy} onClick={save} style={{ padding: '12px 18px', fontSize: '15px', flex: 1, background: '#3fb950', borderColor: '#3fb950' }}>
+          {busy ? 'Saving…' : `Got ${kind === 'cash' ? 'cash' : 'a check'} for $${amount.toFixed(0)}`}
+        </button>
+        <button type="button" className="btn-ghost" onClick={e => { stop(e); setOpen(false); }} style={{ padding: '12px 14px', fontSize: '14px' }}>Cancel</button>
+      </div>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Keep it safe and hand it to John. He marks it received.</div>
+    </div>
+  );
+}
 
 // Foreman flow: head out → start cutting (starts the clock) → mark the yard cut.
 const ON_MY_WAY = { label: '🚚 On My Way',     next: 'en_route',    color: '#9c55f7' };
@@ -33,7 +78,7 @@ const dayOf = job => job.scheduledDate || todayString();
 
 export default function TechnicianView() {
   const { activeTechId, user, setActiveTechId, demoMode } = useApp();
-  const { jobs, updateJobStatus2 } = useJobs();
+  const { jobs, updateJobStatus2, crewCollect } = useJobs();
   const { technicians, updateTechLocation, updateTechStatus } = useTechnicians();
   const { addExpense } = useExpenses({ poll: false });
   const gps = useShareLocation(activeTechId, updateTechLocation);
@@ -65,6 +110,24 @@ export default function TechnicianView() {
   const earnedToday = doneToday.reduce((sum, j) => sum + (j.earnings || 0), 0);
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(''), 5000); };
+
+  // Money at each address: unpaid finished visits, and anything already collected / promised.
+  const owedAt = key => {
+    const unpaid = jobs.filter(j => lawnKey(j) === key && j.status === 'completed' && !j.paid);
+    const pending = unpaid.find(j => j.checkPending)?.checkPending || null;
+    return { amount: unpaid.reduce((s, j) => s + (j.earnings || 0), 0), pending };
+  };
+  const collect = async (job, kind, number) => {
+    const r = await crewCollect(job.id, kind, number);
+    flash(`Got ${kind === 'cash' ? 'cash' : 'a check'} for $${Math.round(r.amount)} from ${job.clientName}. Hand it to John. It's on his list to clear.`);
+  };
+  // Today's cut lawns: "Got paid" until the money is in hand.
+  const paidActions = job => {
+    const { amount, pending } = owedAt(lawnKey(job));
+    if (pending?.collectedBy) return <div style={{ fontSize: '13px', fontWeight: 600, color: '#a371f7' }}>📨 {pending.kind === 'cash' ? 'Cash' : 'Check'} collected · hand it to John</div>;
+    if (!amount) return null;
+    return <GotPaid amount={amount} onSave={(kind, number) => collect(job, kind, number)} />;
+  };
 
   // Rain delay: put the whole route on hold, then resume where they left off.
   const onRainDelay = selectedTech?.status === 'rain_delay';
@@ -197,6 +260,14 @@ export default function TechnicianView() {
                       {cuttingFor != null && (
                         <div style={{ width: '100%', fontSize: '13px', fontWeight: 600, color: '#e67e22' }}>✂️ Cutting · {cuttingFor} min</div>
                       )}
+                      {(() => {
+                        const { pending } = owedAt(lawnKey(job));
+                        return pending && pending.how === 'crew' && !pending.collectedBy ? (
+                          <div style={{ width: '100%', fontSize: '13px', fontWeight: 700, color: '#a371f7' }}>
+                            📨 They said they'll hand you a check for ${Math.round(pending.amount)}. After Mark Cut, tap 💵 Got paid.
+                          </div>
+                        ) : null;
+                      })()}
                       {steps.map((step, i) => (
                         <button
                           key={step.next}
@@ -228,7 +299,7 @@ export default function TechnicianView() {
           <h2 style={{ fontSize: '16px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-muted)' }}>Recently Cut</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {done.slice(0, 10).map(job => (
-              <JobCard key={job.id} job={job} />
+              <JobCard key={job.id} job={job} actions={doneToday.includes(job) ? paidActions(job) : null} />
             ))}
           </div>
         </div>

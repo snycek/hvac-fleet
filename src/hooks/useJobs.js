@@ -257,5 +257,14 @@ export function useJobs() {
     await reloadJobs();
   }, [reloadJobs]);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck };
+  // Foreman: the customer paid at the door (kind 'check' | 'cash'); covers their unpaid balance.
+  const crewCollect = useCallback(async (jobId, kind, number = '') => {
+    const res = await fetch('/api/crew/collect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId, kind, number }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save (HTTP ${res.status})`);
+    await reloadJobs();
+    return data;
+  }, [reloadJobs]);
+
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
 }

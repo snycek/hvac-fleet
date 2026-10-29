@@ -436,14 +436,16 @@ function demoQuote(i, weekStart) {
 // (or the first Monday of winter, when the owner jumps to winter).
 // Checks take a few days to show up: a check "sent" this many days ago is still on the way.
 const CHECK_DAYS = 2;
-const checkHowFor = key => (hash(`${key}#`) % 3 === 0 ? 'crew' : 'mail');
+const checkHowFor = key => (hash(`${String(key).split('@')[0]}#`) % 3 === 0 ? 'crew' : 'mail'); // per customer
 const checkNoFor = key => String(1000 + (hash(`${key}$`) % 9000));
+// Customers who hand their check to the crew: the foreman has it until John clears it.
+const crewHas = j => (checkHowFor(j.id) === 'crew' ? { collectedBy: ALL_FOREMEN.find(f => f.id === j.assignedTo)?.name || 'Crew' } : {});
 function checksStillComing(jobs, today) {
   let out = jobs;
   for (const j of jobs) {
     if (!j.paid || j.paymentMethod !== 'check' || String(j.paidAt).slice(0, 10) < addDays(today, -CHECK_DAYS)) continue;
     const back = out.map(x => (x.id === j.id ? { ...x, paid: false, paidAt: null, paymentMethod: null } : x));
-    out = promiseCheck(back, { jobIds: [j.id], how: checkHowFor(j.id), number: checkNoFor(j.id), at: j.paidAt }).jobs;
+    out = promiseCheck(back, { jobIds: [j.id], how: checkHowFor(j.id), number: checkNoFor(j.id), at: j.paidAt, ...crewHas(j) }).jobs;
   }
   return out;
 }
@@ -528,7 +530,7 @@ export function useDemoSim() {
           const when = iso(at(next, 9, 5 + (hash(j.id) % 50)));
           const method = payMethodFor(j.id);
           if (method === 'check') {
-            if (!j.checkPending) books = { ...books, jobs: promiseCheck(books.jobs, { jobIds: [j.id], how: checkHowFor(j.id), number: checkNoFor(j.id), at: when }).jobs };
+            if (!j.checkPending) books = { ...books, jobs: promiseCheck(books.jobs, { jobIds: [j.id], how: checkHowFor(j.id), number: checkNoFor(j.id), at: when, ...crewHas(j) }).jobs };
             continue;
           }
           let result;

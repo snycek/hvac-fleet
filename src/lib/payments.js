@@ -100,19 +100,39 @@ export function applyPaymentResult({ jobs, payments, expenses }, result) {
 export const CHECK_HOW = { mail: 'In the mail', crew: 'Handing it to the crew' };
 const cleanCheckNo = n => String(n || '').replace(/[^\w-]/g, '').slice(0, 12);
 
-export function promiseCheck(jobs, { jobIds, how = 'mail', number = '', by = 'customer', at = new Date().toISOString() }) {
+// kind 'cash' = cash the crew took at the door (John confirms when the foreman hands it in).
+// collectedBy = the foreman who has it in hand.
+export function promiseCheck(jobs, { jobIds, how = 'mail', number = '', by = 'customer', at = new Date().toISOString(), kind = 'check', collectedBy = null }) {
   const ids = new Set(jobIds || []);
   const covered = jobs.filter(j => ids.has(j.id) && j.status === 'completed' && !j.paid);
   if (!covered.length) return { jobs, check: null };
   const check = {
     // Unique even when many are made in the same millisecond (demo history, bulk actions).
     id: `chk_${Date.now().toString(36)}_${(seq += 1).toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-    at, how: CHECK_HOW[how] ? how : 'mail', number: cleanCheckNo(number), by,
+    kind: kind === 'cash' ? 'cash' : 'check',
+    collectedBy: collectedBy ? String(collectedBy).slice(0, 60) : null,
+    collectedAt: collectedBy ? at : null,
+    at, how: CHECK_HOW[how] ? how : 'mail', number: kind === 'cash' ? '' : cleanCheckNo(number), by,
     jobIds: covered.map(j => j.id),
     amount: covered.reduce((s, j) => s + (j.earnings || 0), 0),
   };
   const coveredIds = new Set(check.jobIds);
   return { jobs: jobs.map(j => (coveredIds.has(j.id) ? { ...j, checkPending: check } : j)), check };
+}
+
+/**
+ * Crew at the door: the customer handed over a check (or cash) for their open balance.
+ * If they'd already said a check was coming, that check is marked collected; otherwise a
+ * new one is recorded (already in the foreman's hands).
+ */
+export function crewCollect(jobs, { jobIds, kind = 'check', number = '', foreman, at = new Date().toISOString() }) {
+  const ids = new Set(jobIds || []);
+  const existing = jobs.find(j => ids.has(j.id) && !j.paid && j.checkPending)?.checkPending;
+  if (existing && kind === 'check') {
+    const updated = { ...existing, collectedBy: String(foreman || 'Crew').slice(0, 60), collectedAt: at, number: cleanCheckNo(number) || existing.number };
+    return { jobs: jobs.map(j => (j.checkPending?.id === existing.id && !j.paid ? { ...j, checkPending: updated } : j)), check: updated };
+  }
+  return promiseCheck(jobs, { jobIds: [...ids].filter(id => !jobs.find(j => j.id === id)?.checkPending), how: 'crew', number, by: 'crew', at, kind, collectedBy: foreman || 'Crew' });
 }
 
 /** Checks waiting to arrive / clear, oldest first: [{ ...check, clientName, address, jobs }]. */
@@ -137,8 +157,8 @@ export function settleCheck(books, checkId, ok, at = new Date().toISOString()) {
     processorId: `check_${checkId}`,
     jobIds: covered.map(j => j.id),
     amount: covered.reduce((s, j) => s + (j.earnings || 0), 0),
-    method: 'check', brand: 'Check', last4: check.number || null,
-    status: ok ? 'succeeded' : 'failed', reason: ok ? null : 'Check bounced', at,
+    method: check.kind === 'cash' ? 'cash' : 'check', brand: check.kind === 'cash' ? null : 'Check', last4: check.number || null,
+    status: ok ? 'succeeded' : 'failed', reason: ok ? null : check.kind === 'cash' ? 'Cash never turned in' : 'Check bounced', at,
   });
   const ids = new Set(covered.map(j => j.id));
   return { ...next, jobs: next.jobs.map(j => (ids.has(j.id) ? { ...j, checkPending: null } : j)) };

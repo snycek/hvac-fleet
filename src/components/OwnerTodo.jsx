@@ -83,10 +83,14 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
     setSettling(check.id); setCheckNote('');
     try {
       await settleCheck(check.id, received);
-      setCheckNote(received ? `✓ ${check.clientName}: ${money(check.amount)} paid by check` : `${check.clientName}'s check marked bounced`);
+      setCheckNote(received ? `✓ ${check.clientName}: ${money(check.amount)} paid by ${check.kind === 'cash' ? 'cash' : 'check'}` : `${check.clientName}'s check marked bounced`);
     } catch (e) { setCheckNote(e.message); } finally { setSettling(null); }
   };
-  const checkWhen = c => `${c.how === 'crew' ? 'giving to crew' : 'mailed'} ${shortDate(c.at)}${c.number ? ` · #${c.number}` : ''}`;
+  // "Mike collected 10/2 · #1042" once the crew has it; otherwise how the customer said they'd pay.
+  const checkWhen = c => (c.collectedBy
+    ? `${String(c.collectedBy).split(' ')[0]} collected ${shortDate(c.collectedAt)}${c.number ? ` · #${c.number}` : ''}`
+    : `${c.how === 'crew' ? 'giving to crew' : 'mailed'} ${shortDate(c.at)}${c.number ? ` · #${c.number}` : ''}`);
+  const anyCash = checks.some(c => c.kind === 'cash');
   const [paying, setPaying] = useState(null);
   const [showAllUnpaid, setShowAllUnpaid] = useState(false);
   const UNPAID_PREVIEW = 5;
@@ -197,7 +201,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
 
         {checks.length > 0 && (
           <div>
-            <h3 style={{ ...sectionTitle, color: '#a371f7' }}>📨 Checks to clear · {checks.length} · {money(checks.reduce((s, c) => s + c.amount, 0))}</h3>
+            <h3 style={{ ...sectionTitle, color: '#a371f7' }}>📨 Checks{anyCash ? ' & cash' : ''} to clear · {checks.length} · {money(checks.reduce((s, c) => s + c.amount, 0))}</h3>
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
               {(showAllChecks ? checks : checks.slice(0, 5)).map(c => (
                 <div key={c.id} className="check-row">
@@ -205,14 +209,14 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     <Addr job={c.jobs[0]} />
                     <span className="cust-dim"> · {c.clientName}</span>
                     <div className="cust-dim" style={{ fontSize: '12px' }} title={CHECK_HOW[c.how]}>
-                      🧾 {checkWhen(c)} · {c.jobs.length} visit{c.jobs.length === 1 ? '' : 's'}{c.by === 'owner' ? ' · noted by you' : ''}
+                      {c.kind === 'cash' ? '💵 Cash · ' : '🧾 '}{checkWhen(c)} · {c.jobs.length} visit{c.jobs.length === 1 ? '' : 's'}{c.by === 'owner' ? ' · noted by you' : ''}
                     </div>
                   </span>
                   <b style={{ width: '58px', textAlign: 'right' }}>{money(c.amount)}</b>
                   <span className="row-actions">
-                    <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, false)} title="The check bounced">Bounced</button>
+                    {c.kind !== 'cash' && <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, false)} title="The check bounced">Bounced</button>}
                     <button type="button" className="btn-ghost remind-btn" disabled={settling === c.id} onClick={() => settle(c, true)}
-                      style={{ color: '#3fb950', borderColor: '#3fb95055' }} title="Got the check: mark these visits paid by check">{settling === c.id ? '…' : '✓ Received'}</button>
+                      style={{ color: '#3fb950', borderColor: '#3fb95055' }} title={`Got it: mark these visits paid by ${c.kind === 'cash' ? 'cash' : 'check'}`}>{settling === c.id ? '…' : '✓ Received'}</button>
                   </span>
                 </div>
               ))}
@@ -222,9 +226,10 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                 {showAllChecks ? 'Show less' : `Show ${checks.length - 5} more`}
               </button>
             )}
-            {checkNote && <div className={/^✓/.test(checkNote) ? 'remind-done' : 'cust-dim'} style={{ fontSize: '12px', marginTop: '6px' }}>{checkNote}</div>}
           </div>
         )}
+        {/* Stays after the last check is cleared (the list above is gone by then). */}
+        {checkNote && <div className={/^✓/.test(checkNote) ? 'remind-done' : 'cust-dim'} style={{ fontSize: '12px', marginTop: checks.length ? '-6px' : 0 }}>{checkNote}</div>}
 
         {problems.length > 0 && (
           <div>
@@ -326,7 +331,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                       <span className="reminded" title={acct.lastReminder.message}> · 🔔 {shortDate(acct.lastReminder.at)}{acct.reminders > 1 ? ` ×${acct.reminders}` : ''}</span>
                     )}
                     {acct.check && (
-                      <div className="check-badge">📨 Check coming · {checkWhen(acct.check)}{acct.checkCoversAll ? '' : ` · covers ${money(acct.check.amount)}`}</div>
+                      <div className="check-badge">📨 {acct.check.kind === 'cash' ? 'Cash with the crew' : acct.check.collectedBy ? 'Check with the crew' : 'Check coming'} · {checkWhen(acct.check)}{acct.checkCoversAll ? '' : ` · covers ${money(acct.check.amount)}`}</div>
                     )}
                   </span>
                   <button type="button" className="acct-cuts" onClick={() => setOpenAcct(open ? null : acct.key)} aria-expanded={open}
@@ -354,7 +359,7 @@ function OwnerTodo({ jobs, technicians, expenses, scheduleJob, declineJob, markP
                     <button type="button" className="btn-ghost" disabled={settling === acct.check.id} onClick={() => settle({ ...acct.check, clientName: acct.name }, true)}
                       style={{ padding: '3px 10px', fontSize: '12px', color: '#a371f7', borderColor: '#a371f755' }}
                       title={`Got their check: mark ${money(acct.check.amount)} paid by check`}>
-                      {settling === acct.check.id ? '…' : '✓ Acknowledge check'}
+                      {settling === acct.check.id ? '…' : `✓ Acknowledge ${acct.check.kind === 'cash' ? 'cash' : 'check'}`}
                     </button>
                   ) : (
                   <button type="button" className={bare ? 'btn-ghost' : 'btn-primary'} disabled={paying === acct.key} onClick={() => setChoosing(choosing === acct.key ? null : acct.key)}

@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 import { mockJobs } from './src/data/mockData.js';
 import { mockTechnicians } from './src/data/mockData.js';
 import { suggestAddresses } from './src/lib/addressSuggest.js';
-import { applyPaymentResult, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from './src/lib/payments.js';
+import { applyPaymentResult, crewCollect, promiseCheck, settleCheck, simulateCardCharge, voidPayment } from './src/lib/payments.js';
 import { BILLING_DEFAULTS, accountFor, billingSettings, invoiceFor } from './src/lib/invoices.js';
 import { lawnKey } from './src/lib/lawns.js';
 import crypto from 'crypto';
@@ -536,6 +536,23 @@ app.post('/api/checks', (req, res) => {
   jobs.splice(0, jobs.length, ...next);
   res.json(check);
 });
+// Foreman at the door: the customer handed over a check or cash ({ jobId, kind, number }).
+// Covers every unpaid finished visit at that address; John clears it when it's turned in.
+app.post('/api/crew/collect', (req, res) => {
+  const job = jobs.find((j) => j.id === req.body?.jobId);
+  if (!job) return res.status(404).json({ error: 'job not found' });
+  const key = lawnKey(job);
+  const ids = jobs.filter((j) => lawnKey(j) === key && j.status === 'completed' && !j.paid).map((j) => j.id);
+  if (!ids.length) return res.status(400).json({ error: 'Nothing unpaid at this address — mark the cut first.' });
+  const foreman = technicians.find((t) => t.id === job.assignedTo)?.name || req.user?.id || 'Crew';
+  const kind = req.body?.kind === 'cash' ? 'cash' : 'check';
+  const { jobs: next, check } = crewCollect(jobs, { jobIds: ids, kind, number: req.body?.number, foreman });
+  if (!check) return res.status(400).json({ error: 'Nothing unpaid at this address.' });
+  jobs.splice(0, jobs.length, ...next);
+  console.log(`[CREW] ${foreman} collected ${kind} from ${job.clientName}`);
+  res.json({ check, amount: jobs.filter((j) => j.checkPending?.id === check.id).reduce((s, j) => s + (j.earnings || 0), 0) });
+});
+
 // Owner: the check arrived (paid by check) or bounced (shows under Payment problems).
 app.post('/api/checks/:id/:outcome', (req, res) => {
   const { id, outcome } = req.params;

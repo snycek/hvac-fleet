@@ -25,6 +25,11 @@ import PrintInvoices from '../components/PrintInvoices.jsx';
 import CustomerCard from '../components/CustomerCard.jsx';
 import CustomerSearch from '../components/CustomerSearch.jsx';
 import { useIsPhone } from '../hooks/useIsPhone.js';
+import DemoTour from '../components/DemoTour.jsx';
+
+// First visit to the /demo link: a short walkthrough (remembered per browser).
+const TOUR_KEY = 'johnsDemoTourSeen';
+const tourSeen = () => { try { return localStorage.getItem(TOUR_KEY) === '1'; } catch { return false; } };
 import { accountReminder } from '../lib/customers.js';
 import { rankRoutes } from '../lib/routeFit.js';
 import { COMPANY_INFO } from '../data/services.js';
@@ -109,6 +114,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
   const [phoneNumbers, setPhoneNumbers] = useState(false); // slim numbers line opened up
   const [phoneDemo, setPhoneDemo] = useState(false);       // demo controls opened up
   const [phoneActivity, setPhoneActivity] = useState(false);
+  const [tourOpen, setTourOpen] = useState(() => demoOnly && !tourSeen());
+  const closeTour = () => { setTourOpen(false); try { localStorage.setItem(TOUR_KEY, '1'); } catch { /* private mode */ } };
   const [view, setView] = useState('hub'); // 'hub' | 'payroll'
   const [selectedTechId, setSelectedTechId] = useState(null);
   const [printing, setPrinting] = useState(null); // { title, items } for the invoice preview
@@ -403,11 +410,23 @@ export default function OwnerView({ demoOnly = false } = {}) {
         <span className="demo-sep" />
         <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
         <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
+        {demoOnly && !isPhone && <button type="button" className="btn-ghost demo-action" onClick={() => setTourOpen(true)} title="Show the walkthrough again">❓ Tour</button>}
         {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
       </div>
   );
+  const tourSteps = [
+    { targets: ['.phone-demo-pill', '.demo-bar'], title: '🎬 This is a live demo',
+      text: `It's playing at ${sim.speed}× speed with ${sim.truckCount} truck${sim.truckCount === 1 ? '' : 's'}, on made-up customers in Allen Park. ${isPhone ? 'Tap here' : 'Use these controls'} to change the speed, add trucks, pause, or jump to winter.` },
+    { targets: ['.phone-tabs button:nth-child(2)', '.dash-col .dash-panel .dash-tabs'], title: "📥 John's To-Do",
+      text: 'Everything that needs him: checks to clear, past-due accounts, statements to send, and new quote requests.' },
+    { targets: ['.phone-map', '.dash-map'], title: '🗺️ Live map',
+      text: "Trucks move as the crews work. Tap any lawn to open that customer's card." },
+    { targets: ['.phone-tabs button:nth-child(4)', '.cust-search input'], title: '🔍 Find any customer',
+      text: 'Search by address, name or phone to see their visits, payments, and yard outline.' },
+  ];
   const overlaysEl = (
     <>
+      {tourOpen && <DemoTour steps={tourSteps} onClose={closeTour} />}
       {customerKey && (
         <CustomerCard
           customerKey={customerKey} jobs={allJobs} payments={payments} today={today} settings={settings}
@@ -469,6 +488,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
               <button type="button" className="phone-demo-sum" aria-expanded={phoneDemo} onClick={() => setPhoneDemo(o => !o)}>
                 🎬 Demo · {sim.speed}× · {sim.truckCount} truck{sim.truckCount === 1 ? '' : 's'}{sim.lastEvent ? <span className="phone-demo-event"> · {sim.lastEvent}</span> : null} {phoneDemo ? '▾' : '▸'}
               </button>
+              {demoOnly && <button type="button" className="btn-ghost phone-demo-exit" onClick={() => setTourOpen(true)} aria-label="Show the walkthrough">❓</button>}
               {!demoOnly && <button type="button" className="btn-ghost phone-demo-exit" onClick={toggleDemo} aria-label="Exit demo">✕</button>}
             </div>
             {phoneDemo && demoBarEl}

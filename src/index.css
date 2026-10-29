@@ -835,3 +835,22 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   .demo-link-note { order: 3; width: 100%; font-size: 12px; }
   .demo-link-login { padding: 4px 10px; font-size: 12px; }
 }
+
+/* Two trucks: side by side in the Routes panel (phones keep one column) */
+.dash-trucks.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 760px) { .dash-trucks.two { grid-template-columns: 1fr; } }
+
+/* First-visit walkthrough (DemoTour) */
+.tour-root { position: fixed; inset: 0; z-index: 3000; }
+.tour-hole { position: fixed; border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.62); outline: 2px solid #f0b429; transition: all 0.25s ease; pointer-events: none; }
+.tour-bubble { position: fixed; background: #fffdf5; color: #1b1f24; border-radius: 14px; padding: 14px 16px 12px; box-shadow: 0 14px 40px #000a; transition: top 0.25s ease, left 0.25s ease; }
+.tour-arrow { position: absolute; width: 14px; height: 14px; background: #fffdf5; transform: translateX(-50%) rotate(45deg); }
+.tour-bubble.below .tour-arrow { top: -7px; }
+.tour-bubble.above .tour-arrow { bottom: -7px; }
+.tour-step { font-size: 11px; font-weight: 700; color: #8a6d1c; text-transform: uppercase; letter-spacing: 0.6px; }
+.tour-title { font-size: 16px; font-weight: 800; margin: 3px 0 4px; }
+.tour-text { font-size: 13.5px; line-height: 1.45; color: #3a4048; }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.tour-skip { margin-right: auto; background: none; border: none; color: #6b7280; font: inherit; font-size: 12.5px; cursor: pointer; padding: 4px 0; }
+.tour-back { padding: 6px 12px; font-size: 13px; color: #1b1f24; border-color: #d0d5dd; }
+.tour-next { padding: 7px 16px; font-size: 13px; }

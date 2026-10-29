@@ -53,11 +53,15 @@ function TruckCard({ tech, route, selected, onSelect }) {
         borderRadius: '10px', color: 'var(--text-primary)', minWidth: 0,
       }}>
       {/* Who + status */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+      {/* Wraps in narrow cards (two trucks side by side): the status pill drops under the name. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px 8px', minWidth: 0, flexWrap: 'wrap' }}>
         <span style={{ width: '30px', height: '30px', borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '12px', color: st.color, background: `${st.color}22`, border: `2px solid ${st.color}66` }}>{initials}</span>
-        <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ minWidth: 0, flex: '1 1 110px' }}>
           <div style={{ fontWeight: 700, fontSize: '13.5px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tech.name}</div>
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{tech.truckName || 'Truck'} · Start {timeOf(route.start)} · End {route.end ? timeOf(route.end) : (route.start ? 'still out' : '—')}</div>
+          <div style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            title={`Start ${timeOf(route.start)} · End ${route.end ? timeOf(route.end) : (route.start ? 'still out' : '—')}`}>
+            {tech.truckName || 'Truck'} · {route.start ? `${timeOf(route.start)} – ${route.end ? timeOf(route.end) : 'out'}` : 'not started'}
+          </div>
         </div>
         <span style={{ fontSize: '11px', fontWeight: 700, color: st.color, background: `${st.color}1f`, border: `1px solid ${st.color}55`, borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap' }}>{st.label}</span>
       </div>
@@ -110,7 +114,8 @@ function TruckRoutes({ jobs, technicians, today = todayString(), selectedTechId,
   // Fixed order (crew list order) so cards don't jump around while you read them.
   const rows = crew.map(t => ({ tech: t, route: routeFor(t, jobs, today, shifts, delays) }));
   return (
-    <div className="dash-trucks">
+    // Exactly 2 trucks: always side by side (except on phones), even in a narrow column.
+    <div className={rows.length === 2 ? "dash-trucks two" : "dash-trucks"}>
       {rows.map(({ tech, route }) => (
         <TruckCard key={tech.id} tech={tech} route={route} selected={selectedTechId === tech.id} onSelect={onSelect} />
       ))}

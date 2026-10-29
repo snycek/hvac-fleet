@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
-import { SATELLITE_TILES, ZONE_COLORS, ZONE_NAME_SUGGESTIONS, areaSqFt, formatSqFt } from '../lib/zones.js';
+import { SATELLITE_TILES, ZONE_COLORS, ZONE_NAME_SUGGESTIONS, areaSqFt, formatSqFt, satelliteTileUrl } from '../lib/zones.js';
+import { getMapKey, loadMapKey } from '../lib/mapConfig.js';
 
 const pinIcon = L.divIcon({
   className: 'yard-pin',
@@ -52,7 +53,9 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
       // Small read-only maps on phones shouldn't trap page scrolling (two fingers still pan/zoom).
       dragging: !(readOnly && L.Browser.mobile),
     });
-    L.tileLayer(SATELLITE_TILES.url, SATELLITE_TILES.options).addTo(map);
+    const tiles = L.tileLayer(satelliteTileUrl(getMapKey()), SATELLITE_TILES.options).addTo(map);
+    // Switch to the keyed imagery once the server says there's a key.
+    if (!getMapKey()) loadMapKey().then(k => { if (k) tiles.setUrl(satelliteTileUrl(k)); });
     layerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
 

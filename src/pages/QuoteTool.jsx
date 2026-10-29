@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import YardMap from '../components/YardMap.jsx';
 import AddressInput from '../components/AddressInput.jsx';
 import { COMPANY_INFO } from '../data/services.js';
-import { DEFAULT_CENTER, ZONE_NAME_SUGGESTIONS, areaSqFt, estimatePrice, formatPrice, formatSqFt, geocode } from '../lib/zones.js';
+import { DEFAULT_CENTER, ZONE_COLORS, ZONE_NAME_SUGGESTIONS, areaSqFt, estimatePrice, formatPrice, formatSqFt, geocode } from '../lib/zones.js';
 
 // What customers can ask for. id matches the service page id, so a service
 // page's "Request a Quote" button can preselect it.
@@ -64,6 +64,32 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     setCenter({ lat: DEFAULT_CENTER[0], lng: DEFAULT_CENTER[1], manual: true });
     setLookup({ state: 'idle', msg: '' });
     setStep('map');
+  };
+
+  // ✨ Outline my yard: the server traces the grass from the satellite photo. The shapes
+  // land on the map like hand-drawn zones, so the customer can drag corners or delete them.
+  const [outline, setOutline] = useState({ state: 'idle', msg: '' });
+  const [outlineOn, setOutlineOn] = useState(false); // server has it set up
+  useEffect(() => {
+    let off = false;
+    fetch('/api/yard-outline').then(r => (r.ok ? r.json() : null)).then(d => { if (!off) setOutlineOn(Boolean(d?.ready)); }).catch(() => {});
+    return () => { off = true; };
+  }, []);
+  const autoOutline = async () => {
+    if (!center?.lat) return;
+    setOutline({ state: 'busy', msg: '' });
+    try {
+      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: center.lat, lng: center.lng }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not outline it automatically.');
+      if (!data.zones?.length) throw new Error(data.note || "We couldn't spot your lawn in the photo. Tap Draw a Zone to outline it yourself.");
+      const stamp = Date.now();
+      setZones(data.zones.map((z, i) => ({ id: `auto-${stamp}-${i}`, name: z.name, color: ZONE_COLORS[i % ZONE_COLORS.length], points: z.points })));
+      setSelectedId(null);
+      setOutline({ state: 'done', msg: data.note || 'Outlined your lawn. Tap a zone to drag its corners.' });
+    } catch (err) {
+      setOutline({ state: 'error', msg: err.message });
+    }
   };
 
   const renameZone = (id, name) => setZones(zs => zs.map(z => (z.id === id ? { ...z, name } : z)));
@@ -217,6 +243,18 @@ export default function QuoteTool({ setPage, initialServiceId }) {
         tap <b>Draw a Zone</b> and tap each corner of an area you want serviced{snow ? ' — for snow, outline every part of the lot, drive or walk you want plowed' : ''}.
       </p>
       <Steps current={2} />
+
+      {outlineOn && !snow && !center?.manual && (
+        <div className={`outline-auto ${outline.state}`}>
+          <button type="button" className="btn-primary" onClick={autoOutline} disabled={outline.state === 'busy'}>
+            {outline.state === 'busy' ? '✨ Finding your lawn…' : zones.length ? '✨ Outline it for me again' : '✨ Outline my yard for me'}
+          </button>
+          <span>
+            {outline.state === 'busy' ? 'Looking at the satellite photo. This takes about 20 seconds.'
+              : outline.msg || 'We trace your front and back lawn from the satellite photo. You can fix any corner after.'}
+          </span>
+        </div>
+      )}
 
       <div className="quote-layout">
         <div style={{ minWidth: 0 }}>

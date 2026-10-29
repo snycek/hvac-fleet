@@ -2,6 +2,12 @@
 
 // Free Esri satellite imagery (no API key). Native tiles stop at zoom 19;
 // Leaflet upscales past that so customers can zoom in close to trace edges.
+// With the ArcGIS key (ARCGIS_API_KEY on the server), tiles come from Esri's keyed
+// imagery service, which is licensed for business use. Without it, the free endpoint.
+export const satelliteTileUrl = key => (key
+  ? `https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${encodeURIComponent(key)}`
+  : SATELLITE_TILES.url);
+
 export const SATELLITE_TILES = {
   url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   options: {

@@ -16,6 +16,7 @@ import { headsUpRecord, notPayment, wantsHeadsUp } from './src/lib/notify.js';
 import { COMPANY_INFO } from './src/data/services.js';
 import { CREW_KINDS, EMPLOYEE_ROLES, crewKind, isLandscapingJob } from './src/lib/crews.js';
 import { cleanItems, offerTotal, quoteMessage } from './src/lib/landscape.js';
+import { outlineReady, outlineYard } from './yardOutline.js';
 import crypto from 'crypto';
 import { firebaseReady, initFirebase, loadAll, saveNow, scheduleSave, verifyUser } from './store.js';
 
@@ -75,6 +76,8 @@ app.use(express.json({ limit: '8mb' }));
 initFirebase();
 const PUBLIC_API = [
   ['POST', /^\/api\/contact$/],
+  ['*', /^\/api\/yard-outline$/],
+  ['GET', /^\/api\/map-config$/],
   ['GET', /^\/api\/geocode/],
   ['GET', /^\/api\/address-suggest/],
   ['POST', /^\/api\/technicians\/apply$/],
@@ -305,6 +308,51 @@ try {
 }
 
 const TO_PHONE = process.env.TO_PHONE || '+13133789982';
+
+// ---- "✨ Outline my yard" (public: customers use it in the quote tool) ----
+// Each call costs a few cents, so: a few per visitor per hour, a daily cap for the whole
+// site, and the same address isn't outlined twice in a day.
+const OUTLINE_PER_IP_HOUR = 6;
+const OUTLINE_PER_DAY = Number(process.env.OUTLINE_PER_DAY) || 150;
+const outlineHits = new Map(); // ip → [timestamps]
+const outlineCache = new Map(); // 'lat,lng' (≈1 m) → { at, result }
+let outlineDay = { date: '', count: 0 };
+// Map settings for the website: the ArcGIS key for satellite tiles. It's meant to be
+// public (restricted to John's site in ArcGIS), so it's fine to hand to the browser.
+app.get('/api/map-config', (_req, res) => res.json({ imageryKey: process.env.ARCGIS_API_KEY || null }));
+
+// The quote tool only shows the button when this is on (an API key is set).
+app.get('/api/yard-outline', (_req, res) => res.json({ ready: outlineReady() }));
+app.post('/api/yard-outline', async (req, res) => {
+  if (!outlineReady()) return res.status(503).json({ error: "Auto-outline isn't set up yet. Tap Draw a Zone to outline it yourself." });
+  const lat = Number(req.body?.lat);
+  const lng = Number(req.body?.lng);
+  // Stay roughly in the service area (Downriver Michigan).
+  if (!(lat > 41.5 && lat < 43 && lng > -84.5 && lng < -82.5)) return res.status(400).json({ error: 'That spot is outside our service area.' });
+  const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+  const cached = outlineCache.get(key);
+  if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return res.json(cached.result);
+
+  const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
+  const recent = (outlineHits.get(ip) || []).filter(t0 => Date.now() - t0 < 3600 * 1000);
+  if (recent.length >= OUTLINE_PER_IP_HOUR) return res.status(429).json({ error: 'Too many tries. Draw it yourself, or try again in a bit.' });
+  const today = todayString();
+  if (outlineDay.date !== today) outlineDay = { date: today, count: 0 };
+  if (outlineDay.count >= OUTLINE_PER_DAY) return res.status(429).json({ error: 'Auto-outline is busy today. Tap Draw a Zone to outline it yourself.' });
+  outlineHits.set(ip, [...recent, Date.now()]);
+  outlineDay.count += 1;
+
+  try {
+    const { zones, note, usage } = await outlineYard({ lat, lng });
+    const result = { zones, note };
+    outlineCache.set(key, { at: Date.now(), result });
+    console.log(`[OUTLINE] ${key} → ${zones.length} zones (${usage?.input_tokens || 0} in / ${usage?.output_tokens || 0} out)`);
+    return res.json(result);
+  } catch (err) {
+    console.error('[OUTLINE] failed:', err?.message || err);
+    return res.status(502).json({ error: "Couldn't outline it automatically. Tap Draw a Zone to outline it yourself." });
+  }
+});
 
 app.post('/api/contact', async (req, res) => {
   const { name, phone, email, address, city, zip, service, bestTime, message, earnings } = req.body;

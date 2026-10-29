@@ -29,7 +29,9 @@ function nextZoneName(zones, names = ZONE_NAME_SUGGESTIONS) {
  * showArea: label zones with their square footage (customers only see names).
  */
 // zoneNames: the order new zones are named in (snow quotes start with Parking Lot).
-export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames }) {
+// onPickPoint: when set, the next tap on the map is handed back ({ lat, lng }) instead of
+// drawing or selecting (the quote tool's "tap your house" before auto-outlining).
+export default function YardMap({ center, zones, onZonesChange, readOnly = false, height = '60vh', selectedId, onSelect, showArea = true, zoneNames, onPickPoint = null }) {
   const zoneNamesRef = useRef(zoneNames);
   useEffect(() => { zoneNamesRef.current = zoneNames; }, [zoneNames]);
   const containerRef = useRef(null);
@@ -42,7 +44,7 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
   // Latest values for Leaflet event handlers.
   const live = useRef({});
   const zoneLabel = (name, points) => (showArea ? `<b>${name}</b><br>${formatSqFt(areaSqFt(points))}` : `<b>${name}</b>`);
-  live.current = { mode, draft, zones, onZonesChange, onSelect };
+  live.current = { mode, draft, zones, onZonesChange, onSelect, onPickPoint };
 
   // Create the map once.
   useEffect(() => {
@@ -60,7 +62,11 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     mapRef.current = map;
 
     map.on('click', (e) => {
-      const { mode: m, onSelect: select } = live.current;
+      const { mode: m, onSelect: select, onPickPoint: pick } = live.current;
+      if (pick) {
+        pick({ lat: e.latlng.lat, lng: e.latlng.lng });
+        return;
+      }
       if (m === 'drawing') {
         setDraft(d => [...d, [e.latlng.lat, e.latlng.lng]]);
       } else if (select) {
@@ -96,6 +102,13 @@ export default function YardMap({ center, zones, onZonesChange, readOnly = false
     // Only re-center when the property changes, not on every zone edit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [center?.lat, center?.lng, readOnly]);
+
+  // Picking a point: crosshair cursor.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || mode === 'drawing') return;
+    map.getContainer().style.cursor = onPickPoint ? 'crosshair' : '';
+  }, [onPickPoint, mode]);
 
   // Drawing mode tweaks.
   useEffect(() => {

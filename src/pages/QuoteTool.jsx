@@ -75,11 +75,13 @@ export default function QuoteTool({ setPage, initialServiceId }) {
     fetch('/api/yard-outline').then(r => (r.ok ? r.json() : null)).then(d => { if (!off) setOutlineOn(Boolean(d?.ready)); }).catch(() => {});
     return () => { off = true; };
   }, []);
-  const autoOutline = async () => {
-    if (!center?.lat) return;
+  // Typed addresses can land on the street or a neighbor's lot, so the customer taps
+  // their own roof first; the photo is centered on that spot.
+  const autoOutline = async (house) => {
+    if (!house?.lat) return;
     setOutline({ state: 'busy', msg: '' });
     try {
-      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: center.lat, lng: center.lng }) });
+      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not outline it automatically.');
       if (!data.zones?.length) throw new Error(data.note || "We couldn't spot your lawn in the photo. Tap Draw a Zone to outline it yourself.");
@@ -246,12 +248,17 @@ export default function QuoteTool({ setPage, initialServiceId }) {
 
       {outlineOn && !snow && !center?.manual && (
         <div className={`outline-auto ${outline.state}`}>
-          <button type="button" className="btn-primary" onClick={autoOutline} disabled={outline.state === 'busy'}>
-            {outline.state === 'busy' ? '✨ Finding your lawn…' : zones.length ? '✨ Outline it for me again' : '✨ Outline my yard for me'}
-          </button>
+          {outline.state === 'picking' ? (
+            <button type="button" className="btn-ghost" onClick={() => setOutline({ state: 'idle', msg: '' })}>Cancel</button>
+          ) : (
+            <button type="button" className="btn-primary" onClick={() => setOutline({ state: 'picking', msg: '' })} disabled={outline.state === 'busy'}>
+              {outline.state === 'busy' ? '✨ Finding your lawn…' : zones.length ? '✨ Outline it for me again' : '✨ Outline my yard for me'}
+            </button>
+          )}
           <span>
-            {outline.state === 'busy' ? 'Looking at the satellite photo. This takes about 20 seconds.'
-              : outline.msg || 'We trace your front and back lawn from the satellite photo. You can fix any corner after.'}
+            {outline.state === 'picking' ? <b style={{ color: 'var(--text-primary)' }}>👆 Now tap the roof of your house on the map.</b>
+              : outline.state === 'busy' ? 'Looking at the satellite photo. This takes about 20 seconds.'
+                : outline.msg || 'Tap the button, then tap your roof. We trace your lawn from the satellite photo, and you can fix any corner after.'}
           </span>
         </div>
       )}
@@ -266,6 +273,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
             onSelect={setSelectedId}
             showArea={false}
             zoneNames={snowOnly ? SNOW_ZONE_NAMES : undefined}
+            onPickPoint={outline.state === 'picking' ? autoOutline : null}
           />
         </div>
 

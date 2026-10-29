@@ -97,13 +97,14 @@ const SCHEMA = {
   },
 };
 
-const promptFor = span => `This is a straight-down satellite photo, ${SIZE}×${SIZE} pixels, about ${span} meters across (north is up, ~${(span / SIZE * 100).toFixed(0)} cm per pixel). A lawn-care customer's house is at the exact center of the photo (pixel ${SIZE / 2},${SIZE / 2}).
+const promptFor = span => `This is a straight-down satellite photo, ${SIZE}×${SIZE} pixels, about ${span} meters across (north is up, ~${(span / SIZE * 100).toFixed(0)} cm per pixel). A lawn-care customer tapped the roof of their house, and that spot is the exact center of the photo (pixel ${SIZE / 2},${SIZE / 2}). The house under that spot is their property.
 
 Outline the mowable grass that belongs to that one property, as polygons in pixel coordinates (x right, y down, 0–${SIZE - 1}):
 - One polygon per lawn area: the front yard (street side), the back yard, side yards, and the strip between sidewalk and street if there is one.
-- Follow the grass edges: leave out the house, garage, driveway, sidewalks, patios, decks, pools, sheds, gardens/mulch beds, and areas fully under thick tree cover.
+- Trace each lawn to its real edges: out to where the grass actually stops (house wall, driveway, public sidewalk or street curb, fence, garden bed, or the property line). These are usually much bigger than a small box: a typical front yard runs the full width of the lot from the house to the sidewalk, and a back yard runs from the house to the rear fence.
+- Leave out the house, garage, driveway, sidewalks, patios, decks, pools, sheds, gardens/mulch beds, and areas fully under thick tree cover.
 - Stay on this property. Neighboring lots usually start at a fence, a hedge line, a change in mowing pattern, or halfway to the next house. If a boundary is unclear, stay a little inside it.
-- Use 4–12 points per polygon, in order around the edge.
+- Use 4–14 points per polygon, in order around the edge, adding points where the edge bends (around a driveway or a bed).
 - If you can't find this property's grass (photo too dark, all trees, a parking lot), return no zones and say why in note.
 
 In note, give one short sentence the customer will see (e.g. "Outlined your front and back lawns; check the edge by the driveway").`;
@@ -118,6 +119,7 @@ export async function outlineYard(point) {
   let dot = false;
   const keyed = await keyedPhoto(point);
   if (keyed) ({ box, photo, span, dot } = keyed);
+  // dot: the red dot drawn on the house in the keyed photo
   else {
     for (span of SPANS_M) {
       box = bboxAround(point, span);
@@ -135,7 +137,7 @@ export async function outlineYard(point) {
       role: 'user',
       content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: photo } },
-        { type: 'text', text: promptFor(span) + (dot ? '\n\nA small red dot marks the address point at the center. The strip of credit text along the bottom edge is not part of the property.' : '') },
+        { type: 'text', text: promptFor(span) + (dot ? '\n\nA small red dot marks the spot they tapped (on their roof). The strip of credit text along the bottom edge is not part of the property.' : '') },
       ],
     }],
   });

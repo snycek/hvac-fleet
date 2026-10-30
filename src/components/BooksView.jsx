@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { COMPANY_INFO } from '../data/services.js';
 import {
@@ -33,6 +33,47 @@ function download(name, text) {
   const a = document.createElement('a');
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Jump to a section on screen. The href stays so links also work in a saved PDF.
+const jumpTo = id => e => {
+  e.preventDefault();
+  document.getElementById(id)?.scrollIntoView({ block: 'start' }); // instant: long sections make smooth scrolling slow
+  // Update the packet's highlighted section now, not on the next (possibly delayed) scroll event.
+  document.querySelector('.print-root')?.dispatchEvent(new Event('scroll'));
+};
+
+/** Packet section bar: jump to any section; highlights the one you're in. Has its own state so
+ *  scrolling redraws only this bar, not the whole (long) packet. */
+function PacketNav({ rootRef, rowsIn }) {
+  const [inView, setInView] = useState('cover');
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    // The last section whose top has passed under the toolbar (or the last section once
+    // scrolled to the bottom, since a short last section never reaches the top).
+    const update = () => {
+      const line = root.getBoundingClientRect().top + 130;
+      const els = [...root.querySelectorAll('[data-section]')];
+      let cur = 'cover';
+      els.forEach(el => { if (el.getBoundingClientRect().top <= line) cur = el.dataset.section; });
+      if (els.length && root.scrollTop + root.clientHeight >= root.scrollHeight - 4) cur = els.at(-1).dataset.section;
+      setInView(cur);
+    };
+    root.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => root.removeEventListener('scroll', update);
+  }, [rootRef]);
+  return (
+    <nav className="packet-nav" aria-label="Sections">
+      <a href="#pk-cover" onClick={jumpTo('pk-cover')} aria-current={inView === 'cover' ? 'true' : undefined}>Contents</a>
+      {REPORTS.map(r => (
+        <a key={r.id} href={`#pk-${r.id}`} onClick={jumpTo(`pk-${r.id}`)} aria-current={inView === r.id ? 'true' : undefined}>
+          {r.label}{rowsIn[r.id] > 0 && <small>{rowsIn[r.id]}</small>}
+        </a>
+      ))}
+    </nav>
+  );
 }
 
 /** One report page: company, report name, period, basis, then the body. */
@@ -110,10 +151,26 @@ function TBTable({ tb }) {
   );
 }
 
-function GLTable({ gl }) {
+function GLTable({ gl, scope = 'tab' }) {
   if (!gl.length) return <p className="book-empty">No activity this month.</p>;
-  return gl.map(a => (
-    <table key={a.no} className="book-table gl">
+  const idOf = no => `${scope}-gl-${no}`;
+  return [
+    gl.length > 1 && (
+      <table key="index" className="book-table gl-index">
+        <thead><tr><th>Account</th><th>Entries</th><th>Closing balance</th></tr></thead>
+        <tbody>
+          {gl.map(a => (
+            <tr key={a.no}>
+              <td><a href={`#${idOf(a.no)}`} onClick={jumpTo(idOf(a.no))}>{a.no} · {a.name}</a></td>
+              <td>{a.lines.length}</td>
+              <td>{amt(a.closing)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ),
+    ...gl.map(a => (
+    <table key={a.no} id={idOf(a.no)} className="book-table gl">
       <thead>
         <tr className="gl-acct"><th colSpan={7}>{a.no} · {a.name}</th></tr>
         <tr><th>Date</th><th>Type</th><th>Ref</th><th>Name / memo</th><th>Debit</th><th>Credit</th><th>Balance</th></tr>
@@ -126,7 +183,8 @@ function GLTable({ gl }) {
         <tr className="sub"><td colSpan={4}>Closing balance · {account(a.no).name}</td><td>{amt(a.lines.reduce((s, l) => s + l.debit, 0))}</td><td>{amt(a.lines.reduce((s, l) => s + l.credit, 0))}</td><td>{amt(a.closing)}</td></tr>
       </tbody>
     </table>
-  ));
+    )),
+  ];
 }
 
 function ListTable({ head, rows, total }) {
@@ -156,6 +214,7 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
   const [report, setReport] = useState('summary');
   const [basis, setBasis] = useState('accrual');
   const [packet, setPacket] = useState(false);
+  const packetRef = useRef(null);
 
   const from = monthStart(month);
   const asOf = monthEnd(month) < today ? monthEnd(month) : today;
@@ -218,7 +277,7 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
     pl: () => <Sheet title="Profit and Loss" period={period} basis={basisLabel}><PLTable pl={b.pl} ytd={b.ytd} /></Sheet>,
     bs: () => <Sheet title="Balance Sheet" period={`As of ${longDate(asOf)}, compared with ${longDate(b.priorDate)}`} basis="Accrual basis"><BSTable now={b.tb.sheet} prior={b.prior} asOf={asOf} priorDate={b.priorDate} /></Sheet>,
     tb: () => <Sheet title="Trial Balance" period={`As of ${longDate(asOf)}`} basis="Accrual basis"><TBTable tb={b.tb} /></Sheet>,
-    gl: () => <Sheet title="General Ledger" period={period} basis="Accrual basis"><GLTable gl={b.gl} /></Sheet>,
+    gl: (scope = 'tab') => <Sheet title="General Ledger" period={period} basis="Accrual basis"><GLTable gl={b.gl} scope={scope} /></Sheet>,
     sales: () => (
       <Sheet title="Sales Journal" period={period}>
         <ListTable head={['Date', 'Invoice', 'Customer', 'Service', 'Account', 'Amount']}
@@ -287,6 +346,10 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
     ar: () => toCsv(['Customer', 'Address', 'Current', '31-60', '61-90', 'Over 90', 'Total'], b.aging.rows.map(r => [r.name, r.address, r.current.toFixed(2), r.d31.toFixed(2), r.d61.toFixed(2), r.d90.toFixed(2), r.total.toFixed(2)])),
   };
   const slug = `johns-lawn-${month}`;
+  const rowsIn = {
+    gl: b.gl.reduce((n, a) => n + a.lines.length, 0), sales: sales.length, receipts: receipts.length,
+    disb: disb.length, payroll: b.register.length, ar: b.aging.rows.length,
+  };
   const months = [];
   for (let m = firstMonth; m <= today.slice(0, 7); m = nextMonth(m)) months.push(m);
 
@@ -320,24 +383,32 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
       <div className="books-page">{content[report]()}</div>
 
       {packet && createPortal(
-        <div className="print-root" role="dialog" aria-label="Month-end packet">
+        <div className="print-root" role="dialog" aria-label="Month-end packet" ref={packetRef}>
           <div className="print-toolbar">
             <b>📒 Month-end packet · {monthLabel(month)}</b>
             <span>{REPORTS.length} reports · {basisLabel}</span>
             <span style={{ flex: 1 }} />
             <button type="button" className="btn-primary" onClick={() => window.print()}>Print / Save PDF</button>
             <button type="button" className="btn-ghost" onClick={() => setPacket(false)}>Close</button>
+            <PacketNav rootRef={packetRef} rowsIn={rowsIn} />
           </div>
           <div className="print-pages books-packet">
-            <section className="book-sheet book-cover">
+            <section className="book-sheet book-cover" id="pk-cover" data-section="cover">
               <div className="book-cover-co">{COMPANY_INFO.name}</div>
               <h1>Monthly Financial Close</h1>
               <div className="book-cover-month">{monthLabel(month)}</div>
               <div className="book-period">{period} · {basisLabel}</div>
-              <ol className="book-toc">{REPORTS.map(r => <li key={r.id}>{r.label}</li>)}</ol>
+              <ol className="book-toc">{REPORTS.map(r => (
+                <li key={r.id}><a href={`#pk-${r.id}`} onClick={jumpTo(`pk-${r.id}`)}>{r.label}</a>{rowsIn[r.id] > 0 && <span className="book-toc-n"> · {rowsIn[r.id]} {r.id === 'gl' ? 'entries' : 'rows'}</span>}</li>
+              ))}</ol>
               <p className="book-fine">Prepared {longDate(today)} from {COMPANY_INFO.name} operating records.{demo ? ' Demo data.' : ''}</p>
             </section>
-            {REPORTS.map(r => <div key={r.id} className="book-print-page">{content[r.id]()}</div>)}
+            {REPORTS.map(r => (
+              <div key={r.id} id={`pk-${r.id}`} data-section={r.id} className="book-print-page">
+                <a className="packet-up" href="#pk-cover" onClick={jumpTo('pk-cover')}>↑ Contents</a>
+                {content[r.id]('pk')}
+              </div>
+            ))}
           </div>
         </div>,
         document.body,

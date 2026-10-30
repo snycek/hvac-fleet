@@ -1081,6 +1081,22 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .book-cover-month { font-size: 22px; margin-bottom: 6px; }
 .book-cover .book-toc { text-align: left; width: fit-content; margin: 40px auto 0; columns: 1; font-size: 14px; line-height: 1.8; }
 .books-packet .book-sheet { width: 8.5in; min-height: 11in; box-sizing: border-box; }
+/* Packet navigation: section jump bar (toolbar), clickable contents, ↑ Contents per section */
+.packet-nav { flex-basis: 100%; display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 2px; scrollbar-width: thin; }
+.packet-nav a { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.packet-nav a:hover { color: var(--text-primary); border-color: var(--accent-teal); }
+.packet-nav a[aria-current] { background: var(--accent-teal); border-color: var(--accent-teal); color: #0d1117; }
+.packet-nav small { font-size: 10.5px; font-weight: 700; opacity: .75; }
+.books-packet [data-section], .book-table.gl { scroll-margin-top: 112px; }
+.book-print-page { position: relative; }
+.packet-up { position: absolute; top: 12px; right: 16px; z-index: 1; font: 600 12px system-ui, sans-serif; color: #1f6b2b; text-decoration: none; }
+.packet-up:hover { text-decoration: underline; }
+.book-toc a { color: #1f6b2b; text-decoration: none; }
+.book-toc a:hover { text-decoration: underline; }
+.book-toc-n { color: #6e7781; font-size: 12px; }
+.book-table.gl-index { margin-bottom: 18px; }
+.book-table.gl-index a { color: #1f6b2b; text-decoration: none; }
+.book-table.gl-index a:hover { text-decoration: underline; }
 @media (max-width: 700px) {
   .book-sheet { padding: 18px 14px; }
   .book-kpis { grid-template-columns: repeat(2, 1fr); }
@@ -1091,6 +1107,8 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
   .books-packet .book-print-page, .books-packet .book-cover { break-after: page; page-break-after: always; }
   .books-packet .book-print-page:last-child { break-after: auto; page-break-after: auto; }
   .book-table tr { break-inside: avoid; }
+  .packet-up { display: none; }
+  .book-toc a, .book-table.gl-index a { color: inherit; }
 }
 
 /* ---------- Get a quote: address → yard → send ---------- */

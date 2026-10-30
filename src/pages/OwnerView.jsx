@@ -663,7 +663,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
             <>
               <section className="phone-card">
                 <div className="phone-card-head">🚜 Routes today <span className="dash-head-note">{stats.cutToday}/{stats.totalToday} cut · {stats.leftToday} left</span></div>
-                <TruckRoutes jobs={jobs} technicians={routeTechList} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} />
+                <TruckRoutes jobs={jobs} technicians={routeTechList} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} onSaveOrder={demoOn ? null : live.setStopOrder} />
               </section>
               <section className="phone-card">
                 <div className="phone-card-head">🗺️ Live map {stats.onRain > 0 && <span style={{ color: '#58a6ff', fontSize: '12px' }}>🌧 {stats.onRain} on rain delay</span>}</div>
@@ -821,7 +821,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
               )}
             </div>
             {!collapsed.routes && <div className="dash-panel-body">
-              <TruckRoutes jobs={jobs} technicians={demoOn ? technicians.filter(t => t.status !== 'offline') : technicians} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} />
+              <TruckRoutes jobs={jobs} technicians={demoOn ? technicians.filter(t => t.status !== 'offline') : technicians} today={today} selectedTechId={selectedTechId} onSelect={setSelectedTechId} shifts={shifts} delays={delays} onSaveOrder={demoOn ? null : live.setStopOrder} />
             </div>}
           </section>
           <section className={`dash-panel${fold('activity')}`}>

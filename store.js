@@ -14,6 +14,8 @@ let authAdmin = null;
 /** Connect if a service-account key is available (env FIREBASE_SERVICE_ACCOUNT or ./service-account.json). */
 export function initFirebase() {
   let key = null;
+  // Local testing against sample data, never John's real records.
+  if (process.env.STORE_OFFLINE) { console.log('STORE_OFFLINE: Firebase off, sample data only'); return false; }
   try {
     if (process.env.FIREBASE_SERVICE_ACCOUNT) key = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     else if (fs.existsSync('service-account.json')) key = JSON.parse(fs.readFileSync('service-account.json', 'utf8'));

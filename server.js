@@ -630,6 +630,24 @@ app.put('/api/jobs/:id/schedule', (req, res) => {
 
 // Owner moves a lawn's next cut. mode 'once': just this visit (the one after goes back
 // to the regular day + crew). mode 'always': this becomes their regular day from now on.
+// Owner's stop order for a truck's day: { ids: [jobId...] } numbers them 1..n (stopNo, which
+// repeat visits copy forward); { clear: [jobId...] } goes back to the app's shortest drive.
+app.put('/api/routes/order', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 200) : [];
+  const clear = Array.isArray(req.body?.clear) ? req.body.clear.map(String).slice(0, 200) : [];
+  if (!ids.length && !clear.length) return res.status(400).json({ error: 'ids or clear is required' });
+  const changed = [];
+  ids.forEach((id, i) => {
+    const idx = jobs.findIndex((j) => j.id === id);
+    if (idx >= 0) { jobs[idx] = { ...jobs[idx], stopNo: i + 1 }; changed.push(jobs[idx]); }
+  });
+  for (const id of clear) {
+    const idx = jobs.findIndex((j) => j.id === id);
+    if (idx >= 0 && jobs[idx].stopNo != null) { const { stopNo: _s, ...rest } = jobs[idx]; jobs[idx] = rest; changed.push(rest); }
+  }
+  return res.json({ jobs: changed });
+});
+
 app.put('/api/jobs/:id/reschedule', (req, res) => {
   const idx = jobs.findIndex((j) => j.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'job not found' });

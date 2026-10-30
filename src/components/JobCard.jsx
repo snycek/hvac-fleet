@@ -5,7 +5,7 @@ import { formatSqFt } from '../lib/zones.js';
 import { relativeDay, repeatLabel } from '../lib/dates.js';
 import { JOB_STATUS } from '../lib/constants.js';
 
-export default function JobCard({ job, actions, expanded = false, onClick }) {
+export default function JobCard({ job, actions, expanded = false, onClick, stopNo }) {
   const status = JOB_STATUS[job.status] || { label: job.status, color: '#8b949e' };
   const earnings = typeof job.earnings === 'number' ? `$${job.earnings.toFixed(2)}` : '';
   const [showZones, setShowZones] = useState(false);
@@ -21,6 +21,7 @@ export default function JobCard({ job, actions, expanded = false, onClick }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '12px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
+            {stopNo != null && <span className="stop-no" aria-label={`Stop ${stopNo}`}>{stopNo}</span>}
             <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '15px' }}>
               {job.service}
             </span>

@@ -286,6 +286,16 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, []);
 
+  // Owner's stop order for one truck's day ({ ids }) or back to shortest drive ({ clear }).
+  const setStopOrder = useCallback(async body => {
+    const res = await fetch('/api/routes/order', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't save the order (HTTP ${res.status})`);
+    const byId = new Map((data.jobs || []).map(j => [j.id, j]));
+    setJobs(prev => prev.map(j => byId.get(j.id) || j));
+    return data;
+  }, []);
+
   // Checks on the way: the owner notes one (customer called), then marks it received or bounced.
   const reloadJobs = useCallback(async () => {
     const fresh = await fetch('/api/jobs').then(r => r.json()).catch(() => null);
@@ -313,5 +323,5 @@ export function useJobs({ live = true } = {}) {
     return data;
   }, [reloadJobs]);
 
-  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, askCrewSiteCheck, askCrewNextVisit, answerChecks, sendCrewNote, markNoteRead, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
+  return { jobs, updateJobStatus2, assignJob, createJob, scheduleJob, rescheduleJob, setStopOrder, askCrewSiteCheck, askCrewNextVisit, answerChecks, sendCrewNote, markNoteRead, sendLandscapeQuote, acceptLandscapeQuote, declineJob, markPaid, remindCustomer, remindCustomers, sendStatements, updateCustomer, promiseCheck, settleCheck, crewCollect };
 }

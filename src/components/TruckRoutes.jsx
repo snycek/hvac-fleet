@@ -1,8 +1,10 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { TECH_STATUS, statusOf } from '../lib/constants.js';
 import { todayString } from '../lib/dates.js';
 import { crewInfo } from '../lib/crews.js';
 import { dayShift, hoursMins, jobDay, money, rainMinutes } from '../lib/lawns.js';
+import { orderStops } from '../lib/routeOrder.js';
+import StopOrderModal from './StopOrderModal.jsx';
 
 const STOP_COLORS = { completed: '#3fb950', in_progress: '#e67e22', en_route: '#9c55f7' };
 const street = a => String(a || '').split(',')[0];
@@ -10,7 +12,8 @@ const timeOf = iso => (iso ? new Date(iso).toLocaleTimeString('en-US', { hour: '
 const mins = j => (j.startedAt && j.completedAt ? (new Date(j.completedAt) - new Date(j.startedAt)) / 60000 : null);
 
 function routeFor(tech, jobs, today, shifts, delays) {
-  const stops = jobs.filter(j => j.assignedTo === tech.id && jobDay(j, today) === today && !['quote', 'declined'].includes(j.status));
+  // Driving order: shortest from the yard, or the order the owner saved (same as the foreman's phone).
+  const stops = orderStops(jobs.filter(j => j.assignedTo === tech.id && jobDay(j, today) === today && !['quote', 'declined'].includes(j.status)));
   const done = stops.filter(j => j.status === 'completed');
   const skipped = stops.filter(j => j.status === 'skipped'); // not cut, not billed, not "left"
   const timed = done.map(mins).filter(m => m != null && m >= 3 && m < 600);
@@ -115,16 +118,27 @@ function TruckCard({ tech, route, selected, onSelect }) {
 }
 
 /** Today's route for every foreman: lawns left, progress, where they are, what's next. */
-function TruckRoutes({ jobs, technicians, today = todayString(), selectedTechId, onSelect, shifts = [], delays = [] }) {
+function TruckRoutes({ jobs, technicians, today = todayString(), selectedTechId, onSelect, shifts = [], delays = [], onSaveOrder = null }) {
   const crew = technicians.filter(t => t.status !== 'pending_approval');
+  const [ordering, setOrdering] = useState(null); // tech id whose stop order is open
   // Fixed order (crew list order) so cards don't jump around while you read them.
   const rows = crew.map(t => ({ tech: t, route: routeFor(t, jobs, today, shifts, delays) }));
   return (
     // Exactly 2 trucks: always side by side (except on phones), even in a narrow column.
     <div className={rows.length === 2 ? "dash-trucks two" : "dash-trucks"}>
       {rows.map(({ tech, route }) => (
-        <TruckCard key={tech.id} tech={tech} route={route} selected={selectedTechId === tech.id} onSelect={onSelect} />
+        <div key={tech.id} className="truck-slot">
+          <TruckCard tech={tech} route={route} selected={selectedTechId === tech.id} onSelect={onSelect} />
+          {/* Live app only: the demo's routes are planned on real roads already. */}
+          {onSaveOrder && route.stops.length > 1 && (
+            <button type="button" className="link-btn truck-order-btn" onClick={() => setOrdering(tech.id)}>🧭 Stop order</button>
+          )}
+        </div>
       ))}
+      {ordering && (() => {
+        const row = rows.find(r => r.tech.id === ordering);
+        return row ? <StopOrderModal tech={row.tech} stops={row.route.stops} onSave={onSaveOrder} onClose={() => setOrdering(null)} /> : null;
+      })()}
     </div>
   );
 }

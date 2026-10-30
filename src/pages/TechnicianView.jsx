@@ -12,7 +12,9 @@ import { formatDay, todayString } from '../lib/dates.js';
 import CrewHoursCard from '../components/CrewHoursCard.jsx';
 import { usePayroll } from '../hooks/usePayroll.js';
 import { useShifts } from '../hooks/useShifts.js';
-import { lawnKey } from '../lib/lawns.js';
+import { jobDay, lawnKey } from '../lib/lawns.js';
+import { orderStops } from '../lib/routeOrder.js';
+import { directionsLinks } from '../lib/distance.js';
 
 // Skip this lawn today: pick why, then it's off the route (not billed, not late). The
 // next visit still schedules itself.
@@ -126,9 +128,17 @@ export default function TechnicianView() {
   const selectedTech = demoSelectableTechs.find(t => t.id === activeTechId);
 
   const mine = jobs.filter(j => j.assignedTo === activeTechId);
+  // Today's stops in driving order (yard → nearest → next, or the owner's order). Numbered
+  // over the whole day, done ones included, so numbers don't shift as lawns get cut.
+  const todayRoute = orderStops(mine.filter(j => jobDay(j, today) === today && !['quote', 'declined'].includes(j.status)));
+  const stopNo = new Map(todayRoute.map((j, i) => [j.id, i + 1]));
+  const routePos = j => (stopNo.has(j.id) ? stopNo.get(j.id) : 9999);
   const open = mine
     .filter(j => !['completed', 'skipped', 'declined', 'quote'].includes(j.status))
-    .sort((a, b) => dayOf(a).localeCompare(dayOf(b)));
+    .sort((a, b) => dayOf(a).localeCompare(dayOf(b)) || routePos(a) - routePos(b));
+  // The stop to drive to now: the one he's on the way to / cutting, else the next in order.
+  const nextStop = open.find(j => dayOf(j) <= today && ['en_route', 'in_progress'].includes(j.status))
+    || open.find(j => dayOf(j) <= today);
   const groups = [
     { key: 'overdue',  title: 'Overdue',  color: '#ff7b72', jobs: open.filter(j => dayOf(j) < today) },
     { key: 'today',    title: 'Today',    color: 'var(--accent-teal)', jobs: open.filter(j => dayOf(j) === today) },
@@ -277,6 +287,24 @@ export default function TechnicianView() {
         </div>
       )}
 
+      {nextStop && (() => {
+        const links = directionsLinks(nextStop.location, nextStop.address);
+        const n = stopNo.get(nextStop.id);
+        const cutting = nextStop.status === 'in_progress';
+        return (
+          <div className="card next-stop">
+            <div style={{ minWidth: 0 }}>
+              <div className="next-stop-label">{cutting ? 'Cutting now' : 'Next stop'}{n ? ` · ${n} of ${todayRoute.length}` : ''}</div>
+              <div className="next-stop-addr">{String(nextStop.address || '').split(',')[0]}</div>
+              <div className="next-stop-who">{nextStop.clientName}</div>
+            </div>
+            {!cutting && (
+              <a className="btn-primary next-stop-go" href={links.waze} target="_blank" rel="noreferrer">🧭 Waze</a>
+            )}
+          </div>
+        );
+      })()}
+
       {open.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)', marginBottom: '28px' }}>
           <div style={{ fontSize: '40px', marginBottom: '12px' }}>🌱</div>
@@ -303,6 +331,7 @@ export default function TechnicianView() {
                 <JobCard
                   key={job.id}
                   job={job}
+                  stopNo={group.key === 'today' ? stopNo.get(job.id) : undefined}
                   expanded={isExpanded}
                   onClick={() => setExpandedId(isExpanded ? null : job.id)}
                   actions={steps.length ? (

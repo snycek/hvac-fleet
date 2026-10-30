@@ -28,6 +28,11 @@ const REPORTS = [
   { id: 'notes', label: 'Notes' },
 ];
 
+// The short packet (default): what an accountant reads. The detail reports (trial balance,
+// ledger, journals, payroll register) repeat the same numbers; the QuickBooks/Xero import
+// file carries that detail, and "Full detail" adds them to the packet when asked for.
+const CORE = ['summary', 'pl', 'bs', 'ar', 'notes'];
+
 function download(name, text) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/csv;charset=utf-8' }));
   const a = document.createElement('a');
@@ -45,7 +50,7 @@ const jumpTo = id => e => {
 
 /** Packet section bar: jump to any section; highlights the one you're in. Has its own state so
  *  scrolling redraws only this bar, not the whole (long) packet. */
-function PacketNav({ rootRef, rowsIn }) {
+function PacketNav({ rootRef, rowsIn, reports }) {
   const [inView, setInView] = useState('cover');
   useEffect(() => {
     const root = rootRef.current;
@@ -63,11 +68,11 @@ function PacketNav({ rootRef, rowsIn }) {
     root.addEventListener('scroll', update, { passive: true });
     update();
     return () => root.removeEventListener('scroll', update);
-  }, [rootRef]);
+  }, [rootRef, reports]);
   return (
     <nav className="packet-nav" aria-label="Sections">
       <a href="#pk-cover" onClick={jumpTo('pk-cover')} aria-current={inView === 'cover' ? 'true' : undefined}>Contents</a>
-      {REPORTS.map(r => (
+      {reports.map(r => (
         <a key={r.id} href={`#pk-${r.id}`} onClick={jumpTo(`pk-${r.id}`)} aria-current={inView === r.id ? 'true' : undefined}>
           {r.label}{rowsIn[r.id] > 0 && <small>{rowsIn[r.id]}</small>}
         </a>
@@ -214,6 +219,8 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
   const [report, setReport] = useState('summary');
   const [basis, setBasis] = useState('accrual');
   const [packet, setPacket] = useState(false);
+  const [full, setFull] = useState(false); // packet: core reports only, unless Full detail
+  const inPacket = useMemo(() => (full ? REPORTS : REPORTS.filter(r => CORE.includes(r.id))), [full]);
   const packetRef = useRef(null);
 
   const from = monthStart(month);
@@ -270,8 +277,8 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
           {b.checks.map(c => <li key={c.label} className={c.ok ? 'ok' : 'bad'}><span>{c.ok ? '✓' : '✗'}</span> {c.label} <small>{c.detail}</small></li>)}
         </ul>
         <h3 className="book-h3">In this packet</h3>
-        <ol className="book-toc">{REPORTS.filter(r => r.id !== 'summary').map(r => <li key={r.id}>{r.label}</li>)}</ol>
-        <p className="book-fine">{b.inMonth.length} journal entries this month · {sales.length} invoices · {receipts.length} payments · {disb.length} disbursements. A QuickBooks/Xero journal import file comes with this packet.</p>
+        <ol className="book-toc">{inPacket.filter(r => r.id !== 'summary').map(r => <li key={r.id}>{r.label}</li>)}</ol>
+        <p className="book-fine">{b.inMonth.length} journal entries this month · {sales.length} invoices · {receipts.length} payments · {disb.length} disbursements. The QuickBooks/Xero journal import file has every entry{full ? '' : '; the ledger, journals and payroll register are available on request'}.</p>
       </Sheet>
     ),
     pl: () => <Sheet title="Profit and Loss" period={period} basis={basisLabel}><PLTable pl={b.pl} ytd={b.ytd} /></Sheet>,
@@ -386,11 +393,14 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
         <div className="print-root" role="dialog" aria-label="Month-end packet" ref={packetRef}>
           <div className="print-toolbar">
             <b>📒 Month-end packet · {monthLabel(month)}</b>
-            <span>{REPORTS.length} reports · {basisLabel}</span>
+            <span>{inPacket.length} reports · {basisLabel}</span>
+            <label className="packet-full" title="Adds the trial balance, general ledger, sales / receipts / disbursements journals and payroll register">
+              <input type="checkbox" checked={full} onChange={e => setFull(e.target.checked)} /> Full detail (+{REPORTS.length - CORE.length} reports)
+            </label>
             <span style={{ flex: 1 }} />
             <button type="button" className="btn-primary" onClick={() => window.print()}>Print / Save PDF</button>
             <button type="button" className="btn-ghost" onClick={() => setPacket(false)}>Close</button>
-            <PacketNav rootRef={packetRef} rowsIn={rowsIn} />
+            <PacketNav rootRef={packetRef} rowsIn={rowsIn} reports={inPacket} />
           </div>
           <div className="print-pages books-packet">
             <section className="book-sheet book-cover" id="pk-cover" data-section="cover">
@@ -398,12 +408,12 @@ export default function BooksView({ jobs, expenses, payroll, shifts, delays, fix
               <h1>Monthly Financial Close</h1>
               <div className="book-cover-month">{monthLabel(month)}</div>
               <div className="book-period">{period} · {basisLabel}</div>
-              <ol className="book-toc">{REPORTS.map(r => (
+              <ol className="book-toc">{inPacket.map(r => (
                 <li key={r.id}><a href={`#pk-${r.id}`} onClick={jumpTo(`pk-${r.id}`)}>{r.label}</a>{rowsIn[r.id] > 0 && <span className="book-toc-n"> · {rowsIn[r.id]} {r.id === 'gl' ? 'entries' : 'rows'}</span>}</li>
               ))}</ol>
               <p className="book-fine">Prepared {longDate(today)} from {COMPANY_INFO.name} operating records.{demo ? ' Demo data.' : ''}</p>
             </section>
-            {REPORTS.map(r => (
+            {inPacket.map(r => (
               <div key={r.id} id={`pk-${r.id}`} data-section={r.id} className="book-print-page">
                 <a className="packet-up" href="#pk-cover" onClick={jumpTo('pk-cover')}>↑ Contents</a>
                 {content[r.id]('pk')}

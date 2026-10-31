@@ -163,7 +163,8 @@ function PayHistory({ employee, data, today, onStub, onPaid }) {
 
 /** Crew & Payroll: roster on the left, the week's timesheet + pay on the right. */
 // startWeek: open on that week (the To-Do's "Run payroll" for a late week).
-export default function PayrollView({ technicians, jobs, shifts, delays, payroll, today = todayString(), startWeek = null }) {
+// report: the Crew Report panel, shown above the roster (desktop).
+export default function PayrollView({ technicians, jobs, shifts, delays, payroll, today = todayString(), startWeek = null, report = null }) {
   const { employees, settings, addEmployee, updateEmployee, setHours, setPaid } = payroll;
   const [anchor, setAnchor] = useState(startWeek); // null = this week
   const [openPerson, setOpenPerson] = useState(null); // employee id whose pay history is showing
@@ -200,7 +201,9 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
   return (
     <div className="payroll">
       {stub && <PayStub {...stub} onClose={() => setStub(null)} />}
-      <section className="dash-panel">
+      <div className="payroll-side">
+      {report}
+      <section className="dash-panel payroll-crews">
         <div className="dash-panel-head">
           <span className="dash-panel-title">👷 Crews</span>
           <span className="dash-head-note">{employees.filter(e => e.active !== false).length} people</span>
@@ -209,6 +212,7 @@ export default function PayrollView({ technicians, jobs, shifts, delays, payroll
           <Roster crews={crews} employees={employees} onAdd={addEmployee} onUpdate={updateEmployee} />
         </div>
       </section>
+      </div>
 
       <section className="dash-panel">
         <div className="dash-panel-head">

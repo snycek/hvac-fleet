@@ -271,7 +271,7 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 /* Desktop: lock to the window, three columns, panels scroll inside themselves. */
 @media (min-width: 1200px) and (min-height: 700px) {
   .owner-dash { height: 100%; overflow: hidden; }
-  .dash-main { flex: 1; min-height: 0; grid-template-columns: var(--col1, minmax(270px, 19fr)) var(--col2, minmax(0, 34fr)) var(--col3, minmax(250px, 22fr)) var(--col4, minmax(340px, 25fr)); }
+  .dash-main { flex: 1; min-height: 0; grid-template-columns: var(--col1, minmax(270px, 19fr)) var(--col2, minmax(0, 34fr)) var(--col3, minmax(250px, 34fr)); }
   .dash-col > .dash-panel.dash-routes { flex: 0 1 auto; max-height: 62%; }
   .dash-col > .dash-panel { flex: 1 1 0; }
   .dash-map { min-height: 0; }
@@ -358,10 +358,16 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .hub-tabs button[aria-selected="true"] { background: var(--accent-teal)22; color: var(--accent-teal); }
 
 .payroll { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.payroll > .dash-panel { min-height: 420px; }
+.payroll > .dash-panel, .payroll-crews { min-height: 420px; }
+/* Left side of Crew & Payroll: Crew Report on top, the roster under it */
+.payroll-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 @media (min-width: 1200px) and (min-height: 700px) {
-  .payroll { flex: 1; min-height: 0; grid-template-columns: minmax(320px, 24%) minmax(0, 1fr); }
-  .payroll > .dash-panel { min-height: 0; }
+  .payroll { flex: 1; min-height: 0; grid-template-columns: minmax(340px, 26%) minmax(0, 1fr); }
+  .payroll > .dash-panel, .payroll-crews { min-height: 0; }
+  .payroll-side { min-height: 0; }
+  .payroll-side > .dash-panel { flex: 1 1 0; min-height: 0; }
+  .payroll-side > .dash-panel:first-child:not(.payroll-crews) { flex: 0 1 auto; max-height: 55%; }
+  .payroll-side > .dash-panel.collapsed { flex: 0 0 auto; }
 }
 
 /* Roster */

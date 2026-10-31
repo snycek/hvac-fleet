@@ -86,8 +86,7 @@ const loadCollapsed = () => { try { return JSON.parse(localStorage.getItem(COLLA
 const COLUMNS = [
   { panels: ['todo'], track: 'minmax(270px, 19fr)' },
   { panels: ['routes', 'activity'], track: 'minmax(0, 34fr)' },
-  { panels: ['map'], track: 'minmax(250px, 22fr)' },
-  { panels: ['crew'], track: 'minmax(340px, 25fr)' },
+  { panels: ['map'], track: 'minmax(250px, 34fr)' },
 ];
 
 /** Owner hub: everything on one screen. Long lists scroll inside their own panel. */
@@ -768,7 +767,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
           <BooksView jobs={jobs} expenses={expenses} payroll={payroll} shifts={shifts} delays={delays} fixedCosts={fixedCosts} today={today} demo={demoOn} />
         </div>
       ) : view === 'payroll' ? (
-        <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek} />
+        <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek}
+          report={<CrewReport compact collapsed={!!collapsed.crew} onToggleCollapse={() => toggle('crew')} jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />} />
       ) : (
       <div className="dash-main" style={gridVars}>
         {/* 1. To-Do / Lawns */}
@@ -876,10 +876,6 @@ export default function OwnerView({ demoOnly = false } = {}) {
           </section>
         </div>
 
-        {/* 4. Who cut what (the P/L lives on the $ tab) */}
-        <div className="dash-col">
-          <CrewReport compact collapsed={!!collapsed.crew} onToggleCollapse={() => toggle('crew')} jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
-        </div>
       </div>
       )}
     </div>

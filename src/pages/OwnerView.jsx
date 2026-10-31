@@ -83,12 +83,11 @@ const Legend = () => (
 const COLLAPSE_KEY = 'ownerHubCollapsed';
 const loadCollapsed = () => { try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || {}; } catch { return {}; } };
 // Columns and their panels, with each column's normal width (fr so the others fill freed space).
-// Minimums shrink on laptop-width screens so Routes keeps room.
 const COLUMNS = [
-  { panels: ['todo'], track: 'minmax(min(270px, 20vw), 19fr)' },
+  { panels: ['todo'], track: 'minmax(270px, 19fr)' },
   { panels: ['routes', 'activity'], track: 'minmax(0, 34fr)' },
-  { panels: ['map'], track: 'minmax(min(250px, 19vw), 22fr)' },
-  { panels: ['crew'], track: 'minmax(min(340px, 24vw), 25fr)' },
+  { panels: ['map'], track: 'minmax(250px, 22fr)' },
+  { panels: ['crew'], track: 'minmax(340px, 25fr)' },
 ];
 
 /** Owner hub: everything on one screen. Long lists scroll inside their own panel. */

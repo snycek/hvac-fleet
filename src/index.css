@@ -261,17 +261,17 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .dash-tabs { display: flex; gap: 2px; }
 .dash-tabs button { border: none; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 12.5px; padding: 5px 9px; border-radius: 6px; cursor: pointer; }
 .dash-tabs button[aria-selected="true"] { background: var(--accent-teal)22; color: var(--accent-teal); }
-@media (max-width: 1099px) {
+@media (max-width: 1199px) {
   .dash-kpis { flex-basis: 100%; }
   .dash-panel-body { max-height: 560px; }
 }
 @media (max-width: 640px) {
   .kpi-group { flex-basis: 100%; }
 }
-/* Desktop (laptops too: 1100×600 and up): lock to the window, four columns, panels scroll inside themselves. */
-@media (min-width: 1100px) and (min-height: 600px) {
+/* Desktop: lock to the window, three columns, panels scroll inside themselves. */
+@media (min-width: 1200px) and (min-height: 700px) {
   .owner-dash { height: 100%; overflow: hidden; }
-  .dash-main { flex: 1; min-height: 0; grid-template-columns: var(--col1, minmax(min(270px, 20vw), 19fr)) var(--col2, minmax(0, 34fr)) var(--col3, minmax(min(250px, 19vw), 22fr)) var(--col4, minmax(min(340px, 24vw), 25fr)); }
+  .dash-main { flex: 1; min-height: 0; grid-template-columns: var(--col1, minmax(270px, 19fr)) var(--col2, minmax(0, 34fr)) var(--col3, minmax(250px, 22fr)) var(--col4, minmax(340px, 25fr)); }
   .dash-col > .dash-panel.dash-routes { flex: 0 1 auto; max-height: 62%; }
   .dash-col > .dash-panel { flex: 1 1 0; }
   .dash-map { min-height: 0; }
@@ -334,11 +334,11 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .collapse-btn { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 13px; width: 22px; height: 22px; border-radius: 6px; line-height: 1; flex-shrink: 0; padding: 0; }
 .collapse-btn:hover { background: var(--bg-elevated); color: var(--text-primary); }
 .dash-panel.collapsed > .dash-panel-head { border-bottom: none; }
-@media (min-width: 1100px) and (min-height: 600px) {
+@media (min-width: 1200px) and (min-height: 700px) {
   .dash-col > .dash-panel.collapsed { flex: 0 0 auto !important; max-height: none; }
 }
 /* Stacked layout: fixed heights so new rows scroll inside a panel instead of pushing the page */
-@media (max-width: 1099px), (max-height: 599px) {
+@media (max-width: 1199px), (max-height: 699px) {
   .dash-col > .dash-panel:not(.collapsed) { height: 460px; }
   .dash-col > .dash-panel.dash-routes:not(.collapsed) { height: 400px; }
   .dash-panel-body { max-height: none; }
@@ -359,7 +359,7 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 
 .payroll { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .payroll > .dash-panel { min-height: 420px; }
-@media (min-width: 1100px) and (min-height: 600px) {
+@media (min-width: 1200px) and (min-height: 700px) {
   .payroll { flex: 1; min-height: 0; grid-template-columns: minmax(320px, 24%) minmax(0, 1fr); }
   .payroll > .dash-panel { min-height: 0; }
 }
@@ -621,7 +621,7 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .cust-msg { background: var(--bg-primary); border-left: 3px solid #58a6ff; padding: 8px 10px; border-radius: 4px; white-space: pre-wrap; word-break: break-word; }
 
 /* Phones/tablets: Crew numbers only on the Crew & Payroll tab */
-@media not all and (min-width: 1100px) and (min-height: 600px) {
+@media not all and (min-width: 1200px) and (min-height: 700px) {
   .dash-kpis.view-hub .kpi-crew { display: none; }
 }
 

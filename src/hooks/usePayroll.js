@@ -10,24 +10,28 @@ const FIRST = ['Jose', 'Kyle', 'Andre', 'Tyler', 'Luis', 'Brandon', 'Marco', 'De
 const LAST = ['Ramirez', 'Kowalski', 'Hill', 'Brooks', 'Mendoza', 'Price', 'Rossi', 'Grant', 'Flores', 'Wade', 'Nguyen', 'Shaw', 'Haddad', 'Lane', 'Ortiz', 'Cruz', 'Reed', 'Webb', 'Soto', 'Kane', 'Diaz', 'Pruitt', 'Vega', 'Lund', 'Moss'];
 export const CUTTERS_PER_CREW = 2; // 5 made labor cost more than the lawns billed
 
+// Demo pay: every foreman $24/hr, every cutter / laborer $18/hr.
+const FOREMAN_RATE = 24;
+const HELPER_RATE = 18;
+
 // Same crew every time for a given demo foreman.
 function demoCrew(foreman, index) {
   // Plow trucks: just the driver.
-  if (foreman.kind === 'plow') return [{ id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: 26, active: true }];
+  if (foreman.kind === 'plow') return [{ id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: FOREMAN_RATE, active: true }];
   // Landscaping: the foreman plus General Labor.
   if (foreman.kind === 'landscape') {
     return [
-      { id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: 25, active: true },
-      { id: `demo-emp-${foreman.id}-l0`, name: 'Hector Ruiz', role: 'laborer', crewId: foreman.id, rate: 18, active: true },
-      { id: `demo-emp-${foreman.id}-l1`, name: 'Dante Webb', role: 'laborer', crewId: foreman.id, rate: 17, active: true },
-      { id: `demo-emp-${foreman.id}-l2`, name: 'Pedro Vega', role: 'laborer', crewId: foreman.id, rate: 17, active: true },
+      { id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: FOREMAN_RATE, active: true },
+      { id: `demo-emp-${foreman.id}-l0`, name: 'Hector Ruiz', role: 'laborer', crewId: foreman.id, rate: HELPER_RATE, active: true },
+      { id: `demo-emp-${foreman.id}-l1`, name: 'Dante Webb', role: 'laborer', crewId: foreman.id, rate: HELPER_RATE, active: true },
+      { id: `demo-emp-${foreman.id}-l2`, name: 'Pedro Vega', role: 'laborer', crewId: foreman.id, rate: HELPER_RATE, active: true },
     ];
   }
   return [
-    { id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: 24, active: true },
+    { id: `demo-emp-${foreman.id}`, name: foreman.name, role: 'foreman', crewId: foreman.id, rate: FOREMAN_RATE, active: true },
     ...Array.from({ length: CUTTERS_PER_CREW }, (_, i) => {
       const n = index * CUTTERS_PER_CREW + i;
-      return { id: `demo-emp-${foreman.id}-c${i}`, name: `${FIRST[n % FIRST.length]} ${LAST[(n * 7) % LAST.length]}`, role: 'cutter', crewId: foreman.id, rate: 15 + ((n * 3) % 5), active: true };
+      return { id: `demo-emp-${foreman.id}-c${i}`, name: `${FIRST[n % FIRST.length]} ${LAST[(n * 7) % LAST.length]}`, role: 'cutter', crewId: foreman.id, rate: HELPER_RATE, active: true };
     }),
   ];
 }
@@ -100,7 +104,7 @@ export function usePayroll({ demo = false, foremen = [], today } = {}) {
 
   const addEmployee = useCallback(async (emp) => {
     if (demo) {
-      setDemoState(s => ({ ...s, added: [...s.added, { id: `demo-emp-new-${Date.now()}`, role: 'cutter', active: true, rate: 15, ...emp }] }));
+      setDemoState(s => ({ ...s, added: [...s.added, { id: `demo-emp-new-${Date.now()}`, role: 'cutter', active: true, rate: HELPER_RATE, ...emp }] }));
       return;
     }
     const created = await send('/api/employees', 'POST', emp);

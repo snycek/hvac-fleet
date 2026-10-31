@@ -412,9 +412,11 @@ export default function QuoteInbox({ jobs, technicians, scheduleJob, declineJob,
       {quotes.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 440px), 1fr))', gap: '16px' }}>
           {quotes.map(job => (
-            <QuoteCard key={job.id} job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap}
+            <div key={job.id} data-quote-id={job.id} style={{ minWidth: 0 }}>
+            <QuoteCard job={job} now={now} onAdd={() => setAdding(job)} onDecline={() => handleDecline(job)} onPriceLand={() => setPricing(job)} trucks={trucks} shop={shop} onShowOnMap={onShowOnMap}
               skip={skips[job.id] || []} onToggleZone={i => toggleZone(job.id, i)} rates={costRates} fixedCosts={fixedCosts}
               checkVisit={checkFor(job.id)} techName={techName} onAskCrew={askCrewSiteCheck ? () => setAsking(job) : null} />
+            </div>
           ))}
         </div>
       )}

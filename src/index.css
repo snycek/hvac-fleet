@@ -1177,3 +1177,12 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 
 /* $ tab: P/L on top, accountant reports below */
 .money-view { display: flex; flex-direction: column; gap: 16px; }
+
+/* Demo: Test a Quote! (the customer form, opened over the hub) */
+.demo-test-quote { padding: 6px 12px; font-size: 13px; font-weight: 800; white-space: nowrap; }
+.test-quote { position: fixed; inset: 0; z-index: 1500; background: var(--bg-primary); overflow-y: auto; }
+.test-quote-bar { position: sticky; top: 0; z-index: 1100; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; background: var(--bg-secondary, #161b22); border-bottom: 1px solid #f0b42955; color: #f0b429; font-size: 13px; }
+.test-quote-bar .btn-ghost { flex: none; padding: 6px 12px; }
+.test-quote-body { max-width: 1100px; margin: 0 auto; padding: 24px 16px 90px; }
+[data-quote-id] { border-radius: 12px; transition: box-shadow 0.6s ease-out; }
+.quote-new-flash { box-shadow: 0 0 0 2px #3fb950, 0 0 24px #3fb95066; }

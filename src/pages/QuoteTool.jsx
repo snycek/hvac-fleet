@@ -20,7 +20,8 @@ const SNOW_ZONE_NAMES = ['Parking Lot', 'Driveway', 'Sidewalks', 'Loading Area',
 
 const EMPTY_FORM = { name: '', phone: '', email: '', address: '', city: '', zip: '' };
 
-export default function QuoteTool({ setPage, initialServiceId }) {
+// onDemoSend: the demo's "Test a Quote!" — the request goes to the demo hub, never to John.
+export default function QuoteTool({ setPage, initialServiceId, onDemoSend = null }) {
   // Address first (one field), then the yard and price, then where to send it.
   const [step, setStep] = useState('details'); // details (address) | map | contact | sent
   const [form, setForm] = useState(EMPTY_FORM);
@@ -244,10 +245,7 @@ export default function QuoteTool({ setPage, initialServiceId }) {
       } : {}),
     };
     try {
-      const res = await fetch('/api/contact', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const payload = {
           ...form,
           service: `Quote: ${wanted.join(', ')}`,
           requested: wanted,
@@ -256,7 +254,16 @@ export default function QuoteTool({ setPage, initialServiceId }) {
           message: `${measured ? `Measured ${formatSqFt(totalSqFt)} (${zoneSummary}).${estimate != null ? ` Estimate ${formatPrice(estimate)}.` : ' John to price it.'}` : 'Skipped measuring — call to quote.'}${notes ? ` Notes: ${notes}` : ''}`,
           location: center?.manual ? null : center,
           ...(quote ? { quote } : {}),
-        }),
+      };
+      if (onDemoSend) {
+        await onDemoSend(payload);
+        setSubmit({ state: 'idle', msg: '' });
+        return;
+      }
+      const res = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

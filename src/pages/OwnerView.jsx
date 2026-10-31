@@ -17,6 +17,7 @@ import QuoteInbox from '../components/QuoteInbox.jsx';
 import ProfitLoss from '../components/ProfitLoss.jsx';
 import LawnsPanel from '../components/LawnsPanel.jsx';
 import CrewReport from '../components/CrewReport.jsx';
+import QuoteTool from './QuoteTool.jsx';
 import TruckRoutes from '../components/TruckRoutes.jsx';
 import ActivityFeed from '../components/ActivityFeed.jsx';
 import CollapseButton from '../components/CollapseButton.jsx';
@@ -121,6 +122,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
   const [phoneBooks, setPhoneBooks] = useState(false);
   const [phoneNumbers, setPhoneNumbers] = useState(false); // slim numbers line opened up
   const [phoneDemo, setPhoneDemo] = useState(false);       // demo controls opened up
+  const [testQuote, setTestQuote] = useState(false);       // demo: the customer quote form, opened over the hub
   const [phoneActivity, setPhoneActivity] = useState(false);
   const [tourOpen, setTourOpen] = useState(() => demoOnly && !tourSeen());
   const tourQuote = useRef(null); // the quote the walkthrough approves, to open its card after
@@ -494,6 +496,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
         <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
         <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
         {demoOnly && !isPhone && <button type="button" className="btn-ghost demo-action" onClick={openTour} title="Show the walkthrough again">❓ Tour</button>}
+        <button type="button" className="btn-primary demo-action demo-test-quote" onClick={() => setTestQuote(true)} title="Fill out the customer quote form yourself; it lands in Quotes here">📝 Test a Quote!</button>
         {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
       </div>
   );
@@ -570,13 +573,41 @@ export default function OwnerView({ demoOnly = false } = {}) {
       text: 'Search by address, name or phone to see their visits, payments, and yard outline.' },
     { targets: ['.print-root .invoice-sheet'], title: "💵 A customer's monthly bill", before: showStatement,
       text: 'On the 1st, every customer gets one statement: each visit that month, any earlier balance, and a QR code to pay from their phone. It goes by text, email, or paper, whichever they prefer.' },
+    { targets: ['.payroll-side > .dash-panel:first-child'], title: '🚜 Crew Report', before: showPayroll,
+      text: "Each foreman's day: lawns cut, average time per lawn, hours from rollout to back at the shop, rain delays, and what the truck earned. Switch to Week or Month to compare crews." },
     { targets: ['.pay-mark-all'], title: '👷 Running payroll', before: showPayroll, after: runPayroll, nextLabel: 'Run payroll →',
       text: "Hours come straight from each truck's day (rollout to back at the shop). Each Friday, one tap on Mark all paid runs the week's payroll. Tap below to run it now." },
     { targets: ['.print-root .stub-sheet'], title: '🧾 Every paycheck has a stub', before: showStub,
       text: "Each person has a full pay history. A stub shows hours by day, rate, overtime, gross pay, year-to-date, and the check number." },
   ];
+  // Test a Quote!: the visitor's request shows up in Quotes, like a real one would.
+  const sendTestQuote = async body => {
+    const job = await sim.addQuote(body);
+    setTestQuote(false);
+    setPhoneDemo(false);
+    showQuotes();
+    // Bring their quote into view (on phones it sits below the crew notes and checks).
+    setTimeout(() => {
+      const el = document.querySelector(`[data-quote-id="${job.id}"]`);
+      if (!el) return;
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      el.classList.add('quote-new-flash');
+      setTimeout(() => el.classList.remove('quote-new-flash'), 3000);
+    }, 400);
+  };
   const overlaysEl = (
     <>
+      {testQuote && (
+        <div className="test-quote" role="dialog" aria-label="Test a quote">
+          <div className="test-quote-bar">
+            <span>📝 <b>Test a quote</b> · this is the customer&apos;s form. Demo only: nothing is sent to John.</span>
+            <button type="button" className="btn-ghost" onClick={() => setTestQuote(false)}>✕ Close</button>
+          </div>
+          <div className="test-quote-body">
+            <QuoteTool setPage={() => setTestQuote(false)} onDemoSend={sendTestQuote} />
+          </div>
+        </div>
+      )}
       {tourOpen && <DemoTour steps={tourSteps} onClose={closeTour} />}
       {customerKey && (
         <CustomerCard
@@ -716,8 +747,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
           )}
           {phoneTab === 'crew' && (
             <>
-              <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek} />
-              <CrewReport compact jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
+              <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek}
+                report={<CrewReport compact jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />} />
             </>
           )}
         </div>

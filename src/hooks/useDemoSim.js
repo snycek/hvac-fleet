@@ -1276,6 +1276,29 @@ export function useDemoSim(start = {}) {
     return accepted;
   }, [commitWorld]);
 
+  // "Test a Quote!": the visitor's own quote request lands in Quotes (it's never sent anywhere),
+  // shaped like the job the server makes from the website form.
+  const addQuote = useCallback(async body => {
+    const w = worldRef.current;
+    const spot = p => (p && Number.isFinite(p.lat) && Number.isFinite(p.lng) ? { lat: p.lat, lng: p.lng } : null);
+    // Newest quote, so it tops the list (the demo clock can read earlier than the sample quotes).
+    const latest = Math.max(Date.parse(demoNow()), ...w.jobs.filter(j => j.status === 'quote').map(j => Date.parse(j.createdAt) + 60000).filter(Number.isFinite));
+    const newest = new Date(latest).toISOString();
+    const job = {
+      id: `quote-test-${Date.now().toString(36)}`,
+      service: body.service, requested: body.requested || [],
+      clientName: body.name, clientPhone: body.phone, clientEmail: body.email || '', email: body.email || '',
+      address: [body.address, body.city, body.zip].filter(Boolean).join(', ') || 'Address not provided',
+      location: spot(body.location) || spot(body.quote?.center),
+      status: 'quote', assignedTo: null,
+      earnings: typeof body.earnings === 'number' ? body.earnings : 40,
+      notes: body.message || '', bestTime: '', createdAt: newest,
+      ...(body.quote ? { quote: body.quote } : {}),
+    };
+    commitWorld({ ...worldRef.current, jobs: [job, ...w.jobs], lastEvent: `📝 New quote request · ${body.name}` });
+    return job;
+  }, [commitWorld]);
+
   const declineQuote = useCallback(async jobId => {
     const w = worldRef.current;
     commitWorld({ ...w, jobs: w.jobs.map(j => (j.id === jobId ? { ...j, status: 'declined' } : j)) });
@@ -1341,7 +1364,7 @@ export function useDemoSim(start = {}) {
     lawnPlan, moveLawn,
     askCrewSiteCheck, askCrewNextVisit, markNoteRead,
     sendLandscapeQuote, acceptLandscapeQuote,
-    declineQuote,
+    declineQuote, addQuote,
     payments: world.payments || [],
     cutToday: todays.filter(j => j.status === 'completed').length,
     totalToday: todays.length,

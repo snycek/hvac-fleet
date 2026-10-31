@@ -87,7 +87,7 @@ const COLUMNS = [
   { panels: ['todo'], track: 'minmax(270px, 19fr)' },
   { panels: ['routes', 'activity'], track: 'minmax(0, 34fr)' },
   { panels: ['map'], track: 'minmax(250px, 22fr)' },
-  { panels: ['pl', 'crew'], track: 'minmax(340px, 25fr)' },
+  { panels: ['crew'], track: 'minmax(340px, 25fr)' },
 ];
 
 /** Owner hub: everything on one screen. Long lists scroll inside their own panel. */
@@ -623,12 +623,15 @@ export default function OwnerView({ demoOnly = false } = {}) {
     />
   );
 
+  // P/L: top of the $ tab (phone and desktop), above the accountant reports.
+  const plEl = <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} actualFor={actualFor} />;
+
   // ---- Phone: slim numbers line, demo pill, one section per tab, bottom tab bar ----
   if (isPhone) {
     const PHONE_TABS = [
       { id: 'today', icon: '🏠', label: 'Today' },
       { id: 'todo', icon: '📥', label: 'To-Do', badge: todoCount + unreadMsgs },
-      { id: 'money', icon: '💵', label: 'Money', badge: statementsReady ? statementsReady.count : 0 },
+      { id: 'money', icon: '💵', label: '$', badge: statementsReady ? statementsReady.count : 0 },
       { id: 'customers', icon: '👥', label: 'Customers' },
       { id: 'crew', icon: '👷', label: 'Crew' },
     ];
@@ -692,13 +695,13 @@ export default function OwnerView({ demoOnly = false } = {}) {
           )}
           {phoneTab === 'money' && (
             <>
+              {plEl}
               <section className="phone-card">
                 <button type="button" className="phone-card-head phone-toggle" aria-expanded={phoneBooks} onClick={() => setPhoneBooks(o => !o)}>
                   📒 Books <span className="dash-head-note">monthly reports for your accountant {phoneBooks ? '▾' : '▸'}</span>
                 </button>
                 {phoneBooks && <BooksView jobs={jobs} expenses={expenses} payroll={payroll} shifts={shifts} delays={delays} fixedCosts={fixedCosts} today={today} demo={demoOn} />}
               </section>
-              <ProfitLoss compact jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} actualFor={actualFor} />
               <section className="phone-card">
                 <div className="phone-card-head">💵 Billing</div>
                 <BillingPanel jobs={allJobs} today={today} settings={settings} onSaveSettings={billing.save}
@@ -742,7 +745,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
           <div className="hub-tabs" role="tablist" style={{ marginTop: '6px' }}>
             <button type="button" role="tab" aria-selected={view === 'hub'} onClick={() => setView('hub')}>📊 Hub</button>
             <button type="button" role="tab" aria-selected={view === 'payroll'} onClick={() => setView('payroll')}>👷 Crew & Payroll</button>
-            <button type="button" role="tab" aria-selected={view === 'books'} onClick={() => setView('books')}>📒 Books</button>
+            <button type="button" role="tab" aria-selected={view === 'books'} onClick={() => setView('books')}>💵 $</button>
           </div>
         </div>
         {/* On phones/tablets the Crew numbers live on the Crew & Payroll tab, not the Hub. */}
@@ -760,7 +763,10 @@ export default function OwnerView({ demoOnly = false } = {}) {
 
       {overlaysEl}
       {view === 'books' ? (
-        <BooksView jobs={jobs} expenses={expenses} payroll={payroll} shifts={shifts} delays={delays} fixedCosts={fixedCosts} today={today} demo={demoOn} />
+        <div className="money-view">
+          {plEl}
+          <BooksView jobs={jobs} expenses={expenses} payroll={payroll} shifts={shifts} delays={delays} fixedCosts={fixedCosts} today={today} demo={demoOn} />
+        </div>
       ) : view === 'payroll' ? (
         <PayrollView key={payWeek || 'now'} technicians={technicians} jobs={jobs} shifts={shifts} delays={delays} payroll={payroll} today={today} startWeek={payWeek} />
       ) : (
@@ -870,9 +876,8 @@ export default function OwnerView({ demoOnly = false } = {}) {
           </section>
         </div>
 
-        {/* 4. Money + who cut what */}
+        {/* 4. Who cut what (the P/L lives on the $ tab) */}
         <div className="dash-col">
-          <ProfitLoss compact collapsed={!!collapsed.pl} onToggleCollapse={() => toggle('pl')} jobs={jobs} expenses={books} technicians={technicians} addExpense={addExpense} today={today} payments={payments} costRates={costRates} fixedCosts={fixedCosts} onSaveFixedCosts={billing.save} actualFor={actualFor} />
           <CrewReport compact collapsed={!!collapsed.crew} onToggleCollapse={() => toggle('crew')} jobs={jobs} technicians={technicians} today={today} shifts={shifts} delays={delays} />
         </div>
       </div>

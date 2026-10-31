@@ -1163,3 +1163,6 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 .stop-order li .btn-ghost { padding: 4px 10px; font-size: 15px; }
 .stop-order-addr { font-weight: 700; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stop-order-who { font-size: 12px; color: var(--text-muted); }
+
+/* $ tab: P/L on top, accountant reports below */
+.money-view { display: flex; flex-direction: column; gap: 16px; }

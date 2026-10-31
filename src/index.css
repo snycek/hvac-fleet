@@ -646,34 +646,39 @@ select.form-input option { background: var(--bg-elevated); color: var(--text-pri
 
 /* P/L calendar */
 .plcal-backdrop { justify-content: center; align-items: center; padding: 16px; }
-.plcal { width: min(980px, 100%); max-height: 100%; overflow: auto; background: var(--bg-secondary, #161b22); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px 16px; color: var(--text-primary); box-shadow: 0 20px 60px #000a; }
+.plcal { width: min(1200px, 100%); max-height: 100%; overflow: auto; background: var(--bg-secondary, #161b22); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px 16px; color: var(--text-primary); box-shadow: 0 20px 60px #000a; }
 .plcal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.plcal-head h2 { font-size: 19px; font-weight: 800; margin: 0 6px; }
+.plcal-head h2 { font-size: 22px; font-weight: 800; margin: 0 6px; }
 .plcal-head .btn-ghost { padding: 4px 11px; }
 .plcal-totals { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
 .plcal-totals div { background: var(--bg-elevated); border-radius: 8px; padding: 8px; display: flex; flex-direction: column; align-items: center; }
-.plcal-totals b { font-size: 18px; }
-.plcal-totals span { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.plcal-totals b { font-size: 26px; }
+.plcal-totals span { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
 .plcal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 0.9fr); gap: 4px; }
 .plcal-week { display: contents; }
-.plcal-dow { font-size: 11px; color: var(--text-muted); text-transform: uppercase; text-align: center; padding: 2px 0; font-weight: 700; }
-.plcal-day, .plcal-wk { min-height: 74px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 6px; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: 12px; background: var(--bg-primary); color: var(--text-primary); text-align: right; }
-.plcal-day { cursor: pointer; font: inherit; font-size: 12px; }
+.plcal-dow { font-size: 13px; color: var(--text-muted); text-transform: uppercase; text-align: center; padding: 2px 0; font-weight: 700; }
+.plcal-day, .plcal-wk { min-height: 104px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 16px; background: var(--bg-primary); color: var(--text-primary); text-align: right; }
+.plcal-day { cursor: pointer; font: inherit; font-size: 16px; }
 .plcal-day:hover:not(:disabled) { border-color: #58a6ff; }
 .plcal-day.out { opacity: 0.25; cursor: default; }
 .plcal-day.future { opacity: 0.45; cursor: default; }
 .plcal-day.today { outline: 2px solid #f0b429; outline-offset: -2px; }
 .plcal-wk { background: var(--bg-elevated); border-style: dashed; }
-.plcal-num { align-self: flex-start; font-weight: 700; color: var(--text-muted); font-size: 12px; margin-bottom: auto; }
+.plcal-num { align-self: flex-start; font-weight: 700; color: var(--text-muted); font-size: 15px; margin-bottom: auto; }
 .plcal-in { color: #3fb950; font-weight: 600; }
+.plcal-in, .plcal-out, .plcal-net { white-space: nowrap; }
 .plcal-out { color: #ff7b72; }
-.plcal-net { font-weight: 800; font-size: 13px; border-top: 1px solid var(--border); padding-top: 1px; }
-.plcal-key { margin-top: 10px; font-size: 12px; text-align: center; }
+.plcal-net { font-weight: 800; font-size: 20px; border-top: 1px solid var(--border); padding-top: 1px; }
+.plcal-key { margin-top: 10px; font-size: 13px; text-align: center; }
 @media (max-width: 640px) {
   .plcal-totals { grid-template-columns: repeat(2, 1fr); }
   .plcal-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .plcal-wk, .plcal-dow:nth-child(8) { display: none; }
-  .plcal-day { min-height: 54px; padding: 3px; font-size: 10px; }
+  .plcal-day { min-height: 60px; padding: 3px; font-size: 12px; }
+  .plcal-num { font-size: 12px; }
+  .plcal-net { font-size: 13px; letter-spacing: -0.3px; }
+  .plcal-in { font-size: 11px; letter-spacing: -0.3px; }
+  .plcal-totals b { font-size: 20px; }
   .plcal-out { display: none; }
 }
 

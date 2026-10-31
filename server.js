@@ -329,13 +329,19 @@ try {
 const TO_PHONE = process.env.TO_PHONE || '+13133789982';
 
 // ---- "✨ Outline my yard" (public: customers use it in the quote tool) ----
-// Each call costs a few cents, so: a few per visitor per hour, a daily cap for the whole
-// site, and the same address isn't outlined twice in a day.
+// Each call costs a few cents, so: a few per visitor per hour and per day, a daily cap for
+// the whole site, and the same spot isn't outlined twice (served from memory instead).
+// The demo's "Test a Quote!" has its own, smaller allowance so it can never use up
+// real customers' outlines.
 const OUTLINE_PER_IP_HOUR = 12; // moving the ✛ to another roof re-outlines
+const OUTLINE_PER_IP_DAY = 20;
 const OUTLINE_PER_DAY = Number(process.env.OUTLINE_PER_DAY) || 150;
-const outlineHits = new Map(); // ip → [timestamps]
+const DEMO_OUTLINE_PER_IP_DAY = 3;
+const DEMO_OUTLINE_PER_DAY = Number(process.env.DEMO_OUTLINE_PER_DAY) || 30;
+const outlineHits = new Map(); // ip → [timestamps] (last 24 h)
+const demoOutlineHits = new Map(); // ip → [timestamps] (last 24 h)
 const outlineCache = new Map(); // 'lat,lng' (≈1 m) → { at, result }
-let outlineDay = { date: '', count: 0 };
+let outlineDay = { date: '', count: 0, demo: 0 };
 // Map settings for the website: the ArcGIS key for satellite tiles. It's meant to be
 // public (restricted to John's site in ArcGIS), so it's fine to hand to the browser.
 app.get('/api/map-config', (_req, res) => res.json({ imageryKey: process.env.ARCGIS_API_KEY || null }));
@@ -374,23 +380,38 @@ app.post('/api/yard-outline', async (req, res) => {
   const tapped = req.body?.tapped !== false; // false: the typed address (outlined as soon as the map opens)
   const address = tapped ? '' : String(req.body?.address || '').slice(0, 200); // picks the right lot when the pin is in the street
   const key = `${lat.toFixed(5)},${lng.toFixed(5)},${tapped ? 't' : 'a'},${address}`;
+  const demo = req.body?.demo === true;
+  // A spot outlined in the last week costs nothing to show again.
   const cached = outlineCache.get(key);
-  if (cached && Date.now() - cached.at < 24 * 3600 * 1000) return res.json(cached.result);
+  if (cached && Date.now() - cached.at < 7 * 24 * 3600 * 1000) return res.json(cached.result);
 
   const ip = String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.ip || '').split(',')[0].trim();
-  const recent = (outlineHits.get(ip) || []).filter(t0 => Date.now() - t0 < 3600 * 1000);
-  if (recent.length >= OUTLINE_PER_IP_HOUR) return res.status(429).json({ error: 'Too many tries. Draw it yourself, or try again in a bit.' });
+  const now = Date.now();
+  const day = (outlineHits.get(ip) || []).filter(t0 => now - t0 < 24 * 3600 * 1000);
+  if (day.filter(t0 => now - t0 < 3600 * 1000).length >= OUTLINE_PER_IP_HOUR) return res.status(429).json({ error: 'Too many tries. Draw it yourself, or try again in a bit.' });
+  if (day.length >= OUTLINE_PER_IP_DAY) return res.status(429).json({ error: "That's the limit for today. Tap Draw a Zone to outline it yourself." });
   const today = todayString();
-  if (outlineDay.date !== today) outlineDay = { date: today, count: 0 };
+  if (outlineDay.date !== today) outlineDay = { date: today, count: 0, demo: 0 };
   if (outlineDay.count >= OUTLINE_PER_DAY) return res.status(429).json({ error: 'Auto-outline is busy today. Tap Draw a Zone to outline it yourself.' });
-  outlineHits.set(ip, [...recent, Date.now()]);
+  let demoDay = [];
+  if (demo) {
+    demoDay = (demoOutlineHits.get(ip) || []).filter(t0 => now - t0 < 24 * 3600 * 1000);
+    const used = "The demo's auto-outline is used up for today. Tap Draw a Zone to outline the yard yourself; the rest of the quote works the same.";
+    if (demoDay.length >= DEMO_OUTLINE_PER_IP_DAY || outlineDay.demo >= DEMO_OUTLINE_PER_DAY) return res.status(429).json({ error: used });
+  }
+  outlineHits.set(ip, [...day, now]);
+  if (demo) { demoOutlineHits.set(ip, [...demoDay, now]); outlineDay.demo += 1; }
   outlineDay.count += 1;
+  // Keep the in-memory lists from growing forever.
+  if (outlineHits.size > 5000) outlineHits.clear();
+  if (demoOutlineHits.size > 5000) demoOutlineHits.clear();
+  if (outlineCache.size > 3000) outlineCache.delete(outlineCache.keys().next().value);
 
   try {
     const { zones, note, warnings, usage, house, lot } = await outlineYard({ lat, lng, tapped, address });
     const result = { zones, note, warnings, ...(house ? { house } : {}), ...(lot ? { lot } : {}) };
     outlineCache.set(key, { at: Date.now(), result });
-    console.log(`[OUTLINE] ${key} → ${zones.length} zones (${usage?.input_tokens || 0} in / ${usage?.output_tokens || 0} out)`);
+    console.log(`[OUTLINE]${demo ? ' demo' : ''} ${key} → ${zones.length} zones (${usage?.input_tokens || 0} in / ${usage?.output_tokens || 0} out) · today ${outlineDay.count}/${OUTLINE_PER_DAY}, demo ${outlineDay.demo}/${DEMO_OUTLINE_PER_DAY}`);
     return res.json(result);
   } catch (err) {
     console.error('[OUTLINE] failed:', err?.message || err);

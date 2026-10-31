@@ -121,7 +121,7 @@ export default function QuoteTool({ setPage, initialServiceId, onDemoSend = null
     lastOutlined.current = { lat: house.lat, lng: house.lng };
     setOutline({ state: 'busy', msg: '', tapped });
     try {
-      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng, tapped, ...(tapped ? {} : { address: fullAddress }) }) });
+      const res = await fetch('/api/yard-outline', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lat: house.lat, lng: house.lng, tapped, ...(tapped ? {} : { address: fullAddress }), ...(onDemoSend ? { demo: true } : {}) }) });
       const data = await res.json().catch(() => ({}));
       if (run !== runId.current) return; // a newer outline was started
       if (!res.ok) throw new Error(data.error || 'Could not outline it automatically.');

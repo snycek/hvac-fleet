@@ -67,11 +67,14 @@ export default function DemoTour({ steps, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // Measure the bubble once it's drawn so long steps are placed (and kept on screen) correctly.
+  // Measure the bubble before it paints (so it doesn't jump out from under a tap), and again
+  // if it changes size, so long steps are placed (and kept on screen) correctly.
   const shown = Boolean(rect);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = bubbleRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    if (!el) return undefined;
+    setBubbleH(el.offsetHeight || 190);
+    if (typeof ResizeObserver === 'undefined') return undefined;
     const ro = new ResizeObserver(() => setBubbleH(el.offsetHeight || 190));
     ro.observe(el);
     return () => ro.disconnect();

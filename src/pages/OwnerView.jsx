@@ -125,6 +125,12 @@ export default function OwnerView({ demoOnly = false } = {}) {
   const [phoneActivity, setPhoneActivity] = useState(false);
   const [tourOpen, setTourOpen] = useState(() => demoOnly && !tourSeen());
   const tourQuote = useRef(null); // the quote the walkthrough approves, to open its card after
+  // Replaying the walkthrough: it shows (and approves) the waiting lawn quote. If that's
+  // already gone (approved last time, or the demo ran on), start the demo over first.
+  const openTour = () => {
+    if (!sim.jobs.some(j => j.status === 'quote' && !wantsLandscaping(j))) { sim.reset(); sim.play(); }
+    setTourOpen(true);
+  };
   // Ending the tour puts the hub back the way it started (and remembers it was seen).
   const closeTour = () => {
     setTourOpen(false);
@@ -488,7 +494,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
         <span className="demo-sep" />
         <button type="button" className="btn-ghost demo-action" onClick={() => { if (window.confirm('Clear all demo records? Paid history and expenses go to $0 so you can watch it build fresh.')) sim.clearRecords(); }} title="Wipe demo history: P/L starts at $0">🧹 Clear</button>
         <button type="button" className="btn-ghost demo-action" onClick={sim.reset} title="Back to week 1 with sample history">↺ Reset</button>
-        {demoOnly && !isPhone && <button type="button" className="btn-ghost demo-action" onClick={() => setTourOpen(true)} title="Show the walkthrough again">❓ Tour</button>}
+        {demoOnly && !isPhone && <button type="button" className="btn-ghost demo-action" onClick={openTour} title="Show the walkthrough again">❓ Tour</button>}
         {!demoOnly && <button type="button" className="btn-ghost demo-action" onClick={toggleDemo}>✕ Exit</button>}
       </div>
   );
@@ -646,7 +652,7 @@ export default function OwnerView({ demoOnly = false } = {}) {
               <button type="button" className="phone-demo-sum" aria-expanded={phoneDemo} onClick={() => setPhoneDemo(o => !o)}>
                 🎬 Demo · {sim.speed}× · {sim.truckCount} truck{sim.truckCount === 1 ? '' : 's'}{sim.lastEvent ? <span className="phone-demo-event"> · {sim.lastEvent}</span> : null} {phoneDemo ? '▾' : '▸'}
               </button>
-              {demoOnly && <button type="button" className="btn-ghost phone-demo-exit" onClick={() => setTourOpen(true)} aria-label="Show the walkthrough">❓</button>}
+              {demoOnly && <button type="button" className="btn-ghost phone-demo-exit" onClick={openTour} aria-label="Show the walkthrough">❓</button>}
               {!demoOnly && <button type="button" className="btn-ghost phone-demo-exit" onClick={toggleDemo} aria-label="Exit demo">✕</button>}
             </div>
             {phoneDemo && demoBarEl}
